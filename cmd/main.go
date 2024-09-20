@@ -26,7 +26,7 @@ func main() {
 
 	// Example usage of the OpenAI client
 	req := openai.CompletionRequest{
-		Model:  openai.GPT3TextDavinci003,
+		Model:  openai.GPT4o,
 		Prompt: "What is Go programming language?",
 	}
 

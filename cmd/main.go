@@ -1,17 +1,28 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
 
+	"Youtube-Learning-Mode-Ai-Service/pkg/handlers"
+	"Youtube-Learning-Mode-Ai-Service/pkg/services"
+
+	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	openai "github.com/sashabaranov/go-openai"
 )
 
 var openaiClient *openai.Client
 
 func initOpenAIClient() {
+	envPath := filepath.Join("..", ".env")
+	err := godotenv.Load(envPath)
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		log.Fatal("OpenAI API key is missing")
@@ -21,19 +32,18 @@ func initOpenAIClient() {
 }
 
 func main() {
-	// Initialize OpenAI client
+	// Initialize OpenAI client and Redis client
 	initOpenAIClient()
+	services.InitRedis()
 
-	// Example usage of the OpenAI client
-	req := openai.CompletionRequest{
-		Model:  openai.GPT4o,
-		Prompt: "What is Go programming language?",
-	}
+	// Set up router
+	r := mux.NewRouter()
 
-	resp, err := openaiClient.CreateCompletion(context.Background(), req)
-	if err != nil {
-		log.Fatalf("OpenAI API call failed: %v", err)
-	}
+	// Define routes
+	r.HandleFunc("/ai/init-session", handlers.InitializeGPTSession).Methods("POST")
+	r.HandleFunc("/ai/ask-question", handlers.AskGPTQuestion).Methods("POST")
 
-	fmt.Println(resp.Choices[0].Text)
+	// Start the server
+	log.Println("AI Service running on :8082")
+	log.Fatal(http.ListenAndServe(":8082", r))
 }

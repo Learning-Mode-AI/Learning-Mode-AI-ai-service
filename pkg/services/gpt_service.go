@@ -4,12 +4,30 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/joho/godotenv"
 	openai "github.com/sashabaranov/go-openai"
 )
 
 var openaiClient *openai.Client
+
+func InitOpenAIClient() {
+	envPath := filepath.Join("..", ".env")
+	err := godotenv.Load(envPath)
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		log.Fatal("OpenAI API key is missing")
+	}
+
+	openaiClient = openai.NewClient(apiKey)
+}
 
 // Create a GPT session with video info
 func CreateGPTSession(videoID, title, channel string, transcript []string) error {
@@ -40,14 +58,8 @@ func CreateGPTSession(videoID, title, channel string, transcript []string) error
 }
 
 // FetchGPTResponse generates a response from GPT-4 based on a user's question
-// FetchGPTResponse generates a response from GPT-4 based on a user's question
 func FetchGPTResponse(videoID, userQuestion string) (string, error) {
 	ctx := context.Background()
-
-	// Ensure OpenAI client is initialized
-	if openaiClient == nil {
-		return "", fmt.Errorf("OpenAI client is not initialized")
-	}
 
 	// Retrieve the existing conversation history from Redis
 	conversation, err := redisClient.Get(ctx, fmt.Sprintf("%s:conversation", videoID)).Result()

@@ -3,6 +3,7 @@ package handlers
 import (
 	"Youtube-Learning-Mode-Ai-Service/pkg/services"
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
@@ -40,22 +41,29 @@ func InitializeGPTSession(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "GPT session initialized"})
 }
 
+// RespondWithError is a helper function to return an error message as JSON
+func RespondWithError(w http.ResponseWriter, code int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
 // Handle user questions
 func AskGPTQuestion(w http.ResponseWriter, r *http.Request) {
 	var questionReq QuestionRequest
 	if err := json.NewDecoder(r.Body).Decode(&questionReq); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		RespondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
 
 	// Get GPT response
 	aiResponse, err := services.FetchGPTResponse(questionReq.VideoID, questionReq.UserQuestion)
 	if err != nil {
-		http.Error(w, "Failed to get AI response", http.StatusInternalServerError)
+		RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get AI response: %v", err))
 		return
 	}
 
-	// Respond with AI answer
+	// Respond with AI answer in JSON format
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"response": aiResponse})
 }

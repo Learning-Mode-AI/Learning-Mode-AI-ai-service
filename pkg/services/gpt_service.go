@@ -64,6 +64,7 @@ func FetchGPTResponse(videoID, userQuestion string) (string, error) {
 	// Retrieve the existing conversation history from Redis
 	conversation, err := redisClient.Get(ctx, fmt.Sprintf("%s:conversation", videoID)).Result()
 	if err != nil {
+		log.Printf("Failed to retrieve conversation: %v", err)
 		return "", fmt.Errorf("failed to retrieve conversation from Redis: %v", err)
 	}
 
@@ -88,6 +89,7 @@ func FetchGPTResponse(videoID, userQuestion string) (string, error) {
 		},
 	)
 	if err != nil {
+		log.Printf("GPT-4 request failed: %v", err)
 		return "", fmt.Errorf("GPT-4 request failed: %v", err)
 	}
 
@@ -97,6 +99,7 @@ func FetchGPTResponse(videoID, userQuestion string) (string, error) {
 
 	err = redisClient.Set(ctx, fmt.Sprintf("%s:conversation", videoID), updatedConversation, 0).Err()
 	if err != nil {
+		log.Printf("Failed to store updated conversation: %v", err)
 		return "", fmt.Errorf("failed to store updated conversation in Redis: %v", err)
 	}
 

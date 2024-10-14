@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	// Initialize OpenAI client and Redis client
+	// Initialize OpenAI client and Redis connection
 	services.InitOpenAIClient()
 	services.InitRedis()
 
@@ -19,8 +19,8 @@ func main() {
 	r := mux.NewRouter()
 
 	// Define routes
-	r.HandleFunc("/ai/init-session", handlers.InitializeGPTSession).Methods("POST")
-	r.HandleFunc("/ai/ask-question", handlers.AskGPTQuestion).Methods("POST")
+	r.HandleFunc("/ai/init-session", handlers.InitializeAssistantSession).Methods("POST")
+	r.HandleFunc("/ai/ask-question", handlers.AskAssistantQuestion).Methods("POST")
 
 	// Start the server
 	log.Println("AI Service running on :8082")

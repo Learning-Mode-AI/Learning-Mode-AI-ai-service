@@ -5,103 +5,99 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/joho/godotenv"
 	openai "github.com/sashabaranov/go-openai"
 )
 
-var openaiClient *openai.Client
+// Initialize the OpenAI client globally
+var OpenAIClient *openai.Client
 
+// GetEnv retrieves environment variables with a fallback value.
+func GetEnv(key, fallback string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return fallback
+}
+
+// InitOpenAIClient initializes the OpenAI client
 func InitOpenAIClient() {
-	envPath := filepath.Join("..", ".env")
-	err := godotenv.Load(envPath)
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	envPath := "../.env" // or the correct relative path
+	if err := godotenv.Load(envPath); err != nil {
+		log.Fatalf("Error loading .env file from %s: %v", envPath, err)
 	}
 
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := GetEnv("OPENAI_API_KEY", "")
 	if apiKey == "" {
 		log.Fatal("OpenAI API key is missing")
 	}
+	log.Println("OpenAI API Key loaded successfully")
 
-	openaiClient = openai.NewClient(apiKey)
+	OpenAIClient = openai.NewClient(apiKey)
 }
 
-// Create a GPT session with video info
-func CreateGPTSession(videoID, title, channel string, transcript []string) error {
+// CreateAssistantSession creates an assistant and stores IDs in Redis
+func CreateAssistantSession(videoID, title, channel string, transcript []string) (string, error) {
 	ctx := context.Background()
 
-	// Create the initial system message with video context
-	initialMessage := fmt.Sprintf(
-		"You are helping a user based on the following video:\n\nTitle: %s\nChannel: %s\nTranscript:\n%s",
-		title, channel, strings.Join(transcript, "\n"),
-	)
+	// Create the assistant
+	req := openai.AssistantRequest{
+		Model:        "gpt-4",
+		Name:         stringPtr("YouTube Learning Mode Assistant"),
+		Instructions: stringPtr(fmt.Sprintf("Help users with video: %s (%s)\n%s", title, channel, strings.Join(transcript, "\n"))),
+	}
 
-	gptKey := fmt.Sprintf("%s:conversation", videoID)
-	log.Printf("Attempting to store GPT conversation using key: %s", gptKey)
-
-	// Use SETNX to create the session only if it doesn't exist
-	success, err := redisClient.SetNX(ctx, gptKey, initialMessage, 0).Result()
+	assistant, err := OpenAIClient.CreateAssistant(ctx, req)
 	if err != nil {
-		return fmt.Errorf("Redis SETNX failed: %v", err)
+		return "", fmt.Errorf("failed to create assistant: %v", err)
 	}
 
-	if success {
-		log.Printf("GPT session initialized for video ID: %s", videoID)
-	} else {
-		log.Printf("GPT session already exists for video ID: %s", videoID)
+	// Store assistant ID in Redis
+	if err := RedisClient.Set(Ctx, fmt.Sprintf("%s:assistantID", videoID), assistant.ID, 0).Err(); err != nil {
+		return "", fmt.Errorf("failed to store assistant ID: %v", err)
 	}
 
-	return nil
+	// Create a thread and store the thread ID in Redis
+	thread, err := OpenAIClient.CreateThread(ctx, openai.ThreadRequest{})
+	if err != nil {
+		return "", fmt.Errorf("failed to create thread: %v", err)
+	}
+	if err := RedisClient.Set(Ctx, fmt.Sprintf("%s:threadID", videoID), thread.ID, 0).Err(); err != nil {
+		return "", fmt.Errorf("failed to store thread ID: %v", err)
+	}
+
+	return thread.ID, nil
 }
 
-// FetchGPTResponse generates a response from GPT-4 based on a user's question
-func FetchGPTResponse(videoID, userQuestion string) (string, error) {
+// StreamAssistantResponse sends a message and streams the assistant's response
+func StreamAssistantResponse(videoID, userQuestion string) (string, error) {
 	ctx := context.Background()
 
-	// Retrieve the existing conversation history from Redis
-	conversation, err := redisClient.Get(ctx, fmt.Sprintf("%s:conversation", videoID)).Result()
+	threadID, err := GetThreadID(videoID)
 	if err != nil {
-		log.Printf("Failed to retrieve conversation: %v", err)
-		return "", fmt.Errorf("failed to retrieve conversation from Redis: %v", err)
+		return "", err
 	}
 
-	// Append the user question to the conversation
-	messages := []openai.ChatCompletionMessage{
-		{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: conversation,
-		},
-		{
-			Role:    openai.ChatMessageRoleUser,
-			Content: userQuestion,
-		},
-	}
-
-	// Call GPT-4 with the conversation and the new question
-	resp, err := openaiClient.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model:    openai.GPT4,
-			Messages: messages,
-		},
-	)
+	// Send the user’s question to the thread
+	resp, err := OpenAIClient.CreateMessage(ctx, threadID, openai.MessageRequest{
+		Role:    string(openai.ThreadMessageRoleUser),
+		Content: userQuestion,
+	})
 	if err != nil {
-		log.Printf("GPT-4 request failed: %v", err)
-		return "", fmt.Errorf("GPT-4 request failed: %v", err)
+		return "", fmt.Errorf("failed to send message: %v", err)
 	}
 
-	// Append the AI response to the conversation history and store it back in Redis
-	aiResponse := resp.Choices[0].Message.Content
-	updatedConversation := fmt.Sprintf("%s\nUser: %s\nAI: %s", conversation, userQuestion, aiResponse)
-
-	err = redisClient.Set(ctx, fmt.Sprintf("%s:conversation", videoID), updatedConversation, 0).Err()
-	if err != nil {
-		log.Printf("Failed to store updated conversation: %v", err)
-		return "", fmt.Errorf("failed to store updated conversation in Redis: %v", err)
+	// Return the assistant's response
+	if len(resp.Content) > 0 && resp.Content[0].Text != nil {
+		return resp.Content[0].Text.Value, nil
 	}
 
-	return aiResponse, nil
+	return "", fmt.Errorf("no response from assistant")
+}
+
+// Helper function to create string pointers
+func stringPtr(s string) *string {
+	return &s
 }

@@ -3,7 +3,6 @@ package handlers
 import (
 	"Youtube-Learning-Mode-Ai-Service/pkg/services"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 )
@@ -22,13 +21,9 @@ type AskAssistantResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// InitializeAssistantSession: Initialize an assistant with YouTube video metadata and return the assistant ID
+// InitializeAssistantSession: Create a new assistant based on YouTube video metadata and return the assistant ID.
 func InitializeAssistantSession(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+	// Decode the incoming request
 	var initReq services.InitializeRequest
 	if err := json.NewDecoder(r.Body).Decode(&initReq); err != nil {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
@@ -38,20 +33,29 @@ func InitializeAssistantSession(w http.ResponseWriter, r *http.Request) {
 	// Create an assistant with metadata
 	assistantID, err := services.CreateAssistantWithMetadata(initReq)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create assistant: %v", err), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	resp := InitializeResponse{AssistantID: assistantID}
+	response := map[string]string{
+		"message":      "Assistant session initialized successfully.",
+		"assistant_id": assistantID,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
-	log.Printf("Assistant initialized with ID: %s for video '%s'", assistantID, initReq.VideoID)
+	json.NewEncoder(w).Encode(response)
+	log.Printf("Assistant session initialized with ID: %s for video '%s'", assistantID, initReq.VideoID)
 }
 
-// AskAssistantQuestion: Interact with the assistant using the question provided
+// Handler for asking a question to the assistant
 func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
-	var req AskAssistantQuestionRequest
+	var req struct {
+		VideoID     string `json:"video_id"`
+		AssistantID string `json:"assistant_id"`
+		Question    string `json:"question"`
+	}
 
+	// Parse the request body
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		return
@@ -59,8 +63,8 @@ func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Received question for assistant '%s': %s", req.AssistantID, req.Question)
 
-	// Ask the assistant a question
-	answer, err := services.AskAssistantQuestion(req.AssistantID, req.Question)
+	// Get or create the thread manager for this assistant
+	response, err := services.AskAssistantQuestion(req.VideoID, req.AssistantID, req.Question)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -68,5 +72,5 @@ func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 
 	// Return the assistant's response
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(AskAssistantResponse{Answer: answer})
+	json.NewEncoder(w).Encode(map[string]string{"answer": response})
 }

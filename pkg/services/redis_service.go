@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"log"
 
 	"github.com/go-redis/redis/v8"
@@ -27,31 +26,4 @@ func InitRedis() {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
 	log.Println("Connected to Redis")
-}
-
-// GetThreadID retrieves the thread ID for a given video ID from Redis
-func GetThreadID(videoID string) (string, error) {
-	threadID, err := RedisClient.Get(Ctx, fmt.Sprintf("%s:threadID", videoID)).Result()
-	if err == redis.Nil {
-		log.Printf("No thread ID found for video ID: %s", videoID)
-		return "", fmt.Errorf("no thread ID found for video ID: %s", videoID)
-	} else if err != nil {
-		log.Printf("Error retrieving thread ID: %v", err)
-		return "", fmt.Errorf("error retrieving thread ID: %v", err)
-	}
-
-	log.Printf("Fetched thread ID: %s", threadID)
-	return threadID, nil
-}
-
-func GetAssistantID(videoID string) (string, error) {
-	assistantID, err := RedisClient.Get(Ctx, fmt.Sprintf("%s:assistantID", videoID)).Result()
-	if err == redis.Nil {
-		log.Printf("No assistant ID found for video ID: %s", videoID)
-		return "", fmt.Errorf("no assistant ID found for video ID: %s", videoID)
-	} else if err != nil {
-		log.Printf("Error retrieving assistant ID: %v", err)
-		return "", fmt.Errorf("error retrieving assistant ID: %v", err)
-	}
-	return assistantID, nil
 }

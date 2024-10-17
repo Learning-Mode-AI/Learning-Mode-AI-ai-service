@@ -1,103 +1,356 @@
 package services
 
 import (
-	"context"
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
-	"strings"
+	"sync"
+	"time"
 
 	"github.com/joho/godotenv"
-	openai "github.com/sashabaranov/go-openai"
 )
 
-// Initialize the OpenAI client globally
-var OpenAIClient *openai.Client
-
-// GetEnv retrieves environment variables with a fallback value.
-func GetEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return fallback
+type ThreadManager struct {
+	ThreadID string
 }
 
-// InitOpenAIClient initializes the OpenAI client
+var (
+	threadManagers = make(map[string]*ThreadManager)
+	mutex          sync.Mutex
+)
+
+// Define InitializeRequest in services.go
+type InitializeRequest struct {
+	SystemInstructions string `json:"system_instructions"`
+	VideoID            string `json:"video_id"`
+	Title              string `json:"title"`
+	Channel            string `json:"channel"`
+	Transcript         string `json:"transcript"`
+}
+
+// Initialize the OpenAI client and load the API key
 func InitOpenAIClient() {
-	envPath := "../.env" // or the correct relative path
-	if err := godotenv.Load(envPath); err != nil {
-		log.Fatalf("Error loading .env file from %s: %v", envPath, err)
+	if err := godotenv.Load("../.env"); err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
 	}
-
-	apiKey := GetEnv("OPENAI_API_KEY", "")
-	if apiKey == "" {
-		log.Fatal("OpenAI API key is missing")
-	}
-	log.Println("OpenAI API Key loaded successfully")
-
-	OpenAIClient = openai.NewClient(apiKey)
 }
 
-// CreateAssistantSession creates an assistant and stores IDs in Redis
-func CreateAssistantSession(videoID, title, channel string, transcript []string) (string, error) {
-	ctx := context.Background()
+// CreateAssistantWithMetadata creates a new assistant based on YouTube video metadata
+func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
+	url := "https://api.openai.com/v1/assistants"
 
-	// Create the assistant
-	req := openai.AssistantRequest{
-		Model:        "gpt-4",
-		Name:         stringPtr("YouTube Learning Mode Assistant"),
-		Instructions: stringPtr(fmt.Sprintf("Help users with video: %s (%s)\n%s", title, channel, strings.Join(transcript, "\n"))),
+	requestBody := map[string]interface{}{
+		"model":        "gpt-4-turbo",
+		"name":         initReq.VideoID,
+		"instructions": fmt.Sprintf("You are a helpful assistant for the video titled '%s' by '%s'. Here is the transcript: %s", initReq.Title, initReq.Channel, initReq.Transcript),
 	}
 
-	assistant, err := OpenAIClient.CreateAssistant(ctx, req)
+	body, err := json.Marshal(requestBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to create assistant: %v", err)
+		return "", fmt.Errorf("failed to marshal request body: %v", err)
 	}
 
-	// Store assistant ID in Redis
-	if err := RedisClient.Set(Ctx, fmt.Sprintf("%s:assistantID", videoID), assistant.ID, 0).Err(); err != nil {
-		return "", fmt.Errorf("failed to store assistant ID: %v", err)
-	}
-
-	// Create a thread and store the thread ID in Redis
-	thread, err := OpenAIClient.CreateThread(ctx, openai.ThreadRequest{})
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		return "", fmt.Errorf("failed to create thread: %v", err)
-	}
-	if err := RedisClient.Set(Ctx, fmt.Sprintf("%s:threadID", videoID), thread.ID, 0).Err(); err != nil {
-		return "", fmt.Errorf("failed to store thread ID: %v", err)
+		return "", fmt.Errorf("failed to create HTTP request: %v", err)
 	}
 
-	return thread.ID, nil
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("OPENAI_API_KEY")))
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to create assistant: %s", string(bodyBytes))
+	}
+
+	var createResp struct {
+		ID string `json:"id"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&createResp)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	return createResp.ID, nil
 }
 
-// StreamAssistantResponse sends a message and streams the assistant's response
-func StreamAssistantResponse(videoID, userQuestion string) (string, error) {
-	ctx := context.Background()
-
-	threadID, err := GetThreadID(videoID)
+// AskAssistantQuestion adds a question to the thread and gets a response
+func AskAssistantQuestion(assistantID, question string) (string, error) {
+	threadManager, err := GetOrCreateThreadManager(assistantID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get thread manager: %v", err)
 	}
 
-	// Send the user’s question to the thread
-	resp, err := OpenAIClient.CreateMessage(ctx, threadID, openai.MessageRequest{
-		Role:    string(openai.ThreadMessageRoleUser),
-		Content: userQuestion,
-	})
+	err = threadManager.AddMessageToThread("user", question)
 	if err != nil {
-		return "", fmt.Errorf("failed to send message: %v", err)
+		return "", fmt.Errorf("failed to add message: %v", err)
 	}
 
-	// Return the assistant's response
-	if len(resp.Content) > 0 && resp.Content[0].Text != nil {
-		return resp.Content[0].Text.Value, nil
-	}
-
-	return "", fmt.Errorf("no response from assistant")
+	return threadManager.RunAssistant(assistantID)
 }
 
-// Helper function to create string pointers
-func stringPtr(s string) *string {
-	return &s
+func GetOrCreateThreadManager(assistantID string) (*ThreadManager, error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	if tm, exists := threadManagers[assistantID]; exists {
+		return tm, nil
+	}
+
+	threadID, err := createThread()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create thread: %v", err)
+	}
+
+	tm := &ThreadManager{ThreadID: threadID}
+	threadManagers[assistantID] = tm
+	return tm, nil
+}
+
+func createThread() (string, error) {
+	url := "https://api.openai.com/v1/threads"
+	requestBody := map[string]interface{}{}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("OPENAI_API_KEY")))
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to create thread: %s", string(bodyBytes))
+	}
+
+	var threadResp struct {
+		ID string `json:"id"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&threadResp)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	return threadResp.ID, nil
+}
+
+func (tm *ThreadManager) AddMessageToThread(role, content string) error {
+	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/messages", tm.ThreadID)
+
+	requestBody := map[string]interface{}{
+		"role":    role,
+		"content": content,
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("OPENAI_API_KEY")))
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return fmt.Errorf("failed to add message to thread: %s", string(bodyBytes))
+	}
+
+	return nil
+}
+
+func (tm *ThreadManager) RunAssistant(assistantID string) (string, error) {
+	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/runs", tm.ThreadID)
+
+	requestBody := map[string]interface{}{
+		"assistant_id": assistantID,
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request body: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("OPENAI_API_KEY")))
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to run assistant: %s", string(bodyBytes))
+	}
+
+	var runResp struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&runResp)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	// Poll for completion
+	for {
+		time.Sleep(2 * time.Second)
+		status, err := tm.GetRunStatus(runResp.ID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get run status: %v", err)
+		}
+
+		if status == "completed" {
+			messages, err := tm.GetThreadMessages()
+			if err != nil {
+				return "", fmt.Errorf("failed to get thread messages: %v", err)
+			}
+
+			// Return the assistant message
+			for _, msg := range messages {
+				if msg.Role == "assistant" {
+					var assistantResponse string
+					for _, fragment := range msg.Content {
+						if fragment.Type == "text" && fragment.Text != nil {
+							assistantResponse += fragment.Text.Value
+						}
+					}
+					return assistantResponse, nil
+				}
+			}
+			return "", fmt.Errorf("no assistant message found")
+		}
+	}
+}
+
+func (tm *ThreadManager) GetRunStatus(runID string) (string, error) {
+	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/runs/%s", tm.ThreadID, runID)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("OPENAI_API_KEY")))
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to get run status: %s", string(bodyBytes))
+	}
+
+	var runStatus struct {
+		Status string `json:"status"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&runStatus)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	return runStatus.Status, nil
+}
+
+func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
+	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/messages", tm.ThreadID)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("OPENAI_API_KEY")))
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to get thread messages: %s", string(bodyBytes))
+	}
+
+	var messagesResp struct {
+		Data []Message `json:"data"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&messagesResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	return messagesResp.Data, nil
+}
+
+type TextContent struct {
+	Value       string        `json:"value"`
+	Annotations []interface{} `json:"annotations"` // You can adjust this depending on what the annotations are
+}
+
+type ContentFragment struct {
+	Type string       `json:"type"`
+	Text *TextContent `json:"text,omitempty"` // Only include text if it's of type text
+	// You can include other content types here like image, video, etc.
+}
+
+type Message struct {
+	ID      string            `json:"id"`
+	Role    string            `json:"role"`
+	Content []ContentFragment `json:"content"` // Content is now a list of fragments
 }

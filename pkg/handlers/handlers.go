@@ -3,67 +3,74 @@ package handlers
 import (
 	"Youtube-Learning-Mode-Ai-Service/pkg/services"
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
 )
 
-// Request to initialize a GPT session with video context
-type InitRequest struct {
-	VideoID    string   `json:"video_id"`
-	Title      string   `json:"title"`
-	Channel    string   `json:"channel"`
-	Transcript []string `json:"transcript"`
+type InitializeResponse struct {
+	AssistantID string `json:"assistant_id"`
 }
 
-// Request for asking GPT questions
-type QuestionRequest struct {
-	VideoID      string `json:"video_id"`
-	UserQuestion string `json:"user_question"`
+type AskAssistantQuestionRequest struct {
+	AssistantID string `json:"assistant_id"`
+	Question    string `json:"question"`
 }
 
-// Initialize GPT session with video context
-func InitializeGPTSession(w http.ResponseWriter, r *http.Request) {
-	var initReq InitRequest
+type AskAssistantResponse struct {
+	Answer string `json:"answer"`
+	Error  string `json:"error,omitempty"`
+}
+
+// InitializeAssistantSession: Create a new assistant based on YouTube video metadata and return the assistant ID.
+func InitializeAssistantSession(w http.ResponseWriter, r *http.Request) {
+	// Decode the incoming request
+	var initReq services.InitializeRequest
 	if err := json.NewDecoder(r.Body).Decode(&initReq); err != nil {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
 
-	// Call service to initialize GPT session with transcript
-	err := services.CreateGPTSession(initReq.VideoID, initReq.Title, initReq.Channel, initReq.Transcript)
+	// Create an assistant with metadata
+	assistantID, err := services.CreateAssistantWithMetadata(initReq)
 	if err != nil {
-		http.Error(w, "Failed to initialize GPT session", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Respond to client
+	response := map[string]string{
+		"message":      "Assistant session initialized successfully.",
+		"assistant_id": assistantID,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "GPT session initialized"})
+	json.NewEncoder(w).Encode(response)
+	log.Printf("Assistant session initialized with ID: %s for video '%s'", assistantID, initReq.VideoID)
 }
 
-// RespondWithError is a helper function to return an error message as JSON
-func RespondWithError(w http.ResponseWriter, code int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
+// Handler for asking a question to the assistant
+func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		VideoID     string `json:"video_id"`
+		AssistantID string `json:"assistant_id"`
+		Question    string `json:"question"`
+	}
 
-// Handle user questions
-func AskGPTQuestion(w http.ResponseWriter, r *http.Request) {
-	var questionReq QuestionRequest
-	if err := json.NewDecoder(r.Body).Decode(&questionReq); err != nil {
-		RespondWithError(w, http.StatusBadRequest, "Invalid request payload")
+	// Parse the request body
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
 
-	// Get GPT response
-	aiResponse, err := services.FetchGPTResponse(questionReq.VideoID, questionReq.UserQuestion)
+	log.Printf("Received question for assistant '%s': %s", req.AssistantID, req.Question)
+
+	// Get or create the thread manager for this assistant
+	response, err := services.AskAssistantQuestion(req.VideoID, req.AssistantID, req.Question)
 	if err != nil {
-		RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get AI response: %v", err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Respond with AI answer in JSON format
+	// Return the assistant's response
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"response": aiResponse})
+	json.NewEncoder(w).Encode(map[string]string{"answer": response})
 }

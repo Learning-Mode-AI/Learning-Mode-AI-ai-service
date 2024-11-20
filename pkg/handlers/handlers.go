@@ -53,6 +53,7 @@ func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 		VideoID     string `json:"video_id"`
 		AssistantID string `json:"assistant_id"`
 		Question    string `json:"question"`
+		Timestamp   int    `json:"timestamp"`
 	}
 
 	// Parse the request body
@@ -61,10 +62,10 @@ func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Received question for assistant '%s': %s", req.AssistantID, req.Question)
+	log.Printf("Received question for assistant '%s': %s at timestamp: %d", req.AssistantID, req.Question, req.Timestamp)
 
-	// Get or create the thread manager for this assistant
-	response, err := services.AskAssistantQuestion(req.VideoID, req.AssistantID, req.Question)
+	// Pass the timestamp to the service
+	response, err := services.AskAssistantQuestion(req.VideoID, req.AssistantID, req.Question, req.Timestamp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -93,17 +93,19 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 }
 
 // AskAssistantQuestion adds a question to the thread and gets a response
-func AskAssistantQuestion(videoID, assistantID, question string) (string, error) {
+func AskAssistantQuestion(videoID, assistantID, question string, timestamp int) (string, error) {
 	threadManager, err := GetOrCreateThreadManager(videoID, assistantID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get thread manager: %v", err)
 	}
 
-	err = threadManager.AddMessageToThread("user", question, videoID)
+	// Pass the timestamp to AddMessageToThread
+	err = threadManager.AddMessageToThread("user", question, videoID, timestamp)
 	if err != nil {
 		return "", fmt.Errorf("failed to add message: %v", err)
 	}
 
+	// Run the assistant as usual
 	return threadManager.RunAssistant(assistantID, videoID)
 }
 
@@ -198,15 +200,18 @@ func createThread() (string, error) {
 }
 
 // Storing each interaction message in Redis
-func (tm *ThreadManager) AddMessageToThread(role, content, videoID string) error {
+func (tm *ThreadManager) AddMessageToThread(role, content, videoID string, timestamp int) error {
 	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/messages", tm.ThreadID)
 
+	// Create the prompt with the timestamp
+	prompt := createPrompt(content, timestamp)
+
 	// Log the message being added
-	log.Printf("Adding message to thread. Role: %s, Content: %s, VideoID: %s", role, content, videoID)
+	log.Printf("Adding message to thread. Role: %s, Content: %s, VideoID: %s", role, prompt, videoID)
 
 	requestBody := map[string]interface{}{
 		"role":    role,
-		"content": content,
+		"content": prompt,
 	}
 
 	body, err := json.Marshal(requestBody)
@@ -237,10 +242,10 @@ func (tm *ThreadManager) AddMessageToThread(role, content, videoID string) error
 	}
 
 	// Log success in adding message to thread
-	log.Printf("Message added to thread. Role: %s, Content: %s, VideoID: %s", role, content, videoID)
+	log.Printf("Message added to thread. Role: %s, Content: %s, VideoID: %s", role, prompt, videoID)
 
 	// Store the interaction message in Redis under the videoID key
-	err = RedisClient.RPush(Ctx, "interactions:"+videoID, content).Err()
+	err = RedisClient.RPush(Ctx, "interactions:"+videoID, prompt).Err()
 	if err != nil {
 		log.Printf("Failed to store interaction in Redis for VideoID %s: %v", videoID, err)
 		return fmt.Errorf("failed to store interaction in Redis: %v", err)
@@ -416,6 +421,14 @@ func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
 	// Log successful message retrieval
 	log.Printf("Successfully fetched %d messages from thread with ID: %s", len(messagesResp.Data), tm.ThreadID)
 	return messagesResp.Data, nil
+}
+
+func createPrompt(question string, timestamp int) string {
+	// Format the timestamp as mm:ss
+	formattedTimestamp := fmt.Sprintf("%02d:%02d", timestamp/60, timestamp%60)
+
+	// Create the prompt by appending the timestamp to the question
+	return fmt.Sprintf("At the timestamp <%s>, user asks: %s, Give a response based on the context of the video around the timestamp", formattedTimestamp, question)
 }
 
 type TextContent struct {

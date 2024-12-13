@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"Youtube-Learning-Mode-Ai-Service/pkg/services"
+	"Learning-Mode-AI-Ai-Service/pkg/services"
 	"encoding/json"
 	"log"
 	"net/http"

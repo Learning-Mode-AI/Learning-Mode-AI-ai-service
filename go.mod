@@ -1,4 +1,4 @@
-module Youtube-Learning-Mode-Ai-Service
+module Learning-Mode-AI-Ai-Service
 
 go 1.21.5
 

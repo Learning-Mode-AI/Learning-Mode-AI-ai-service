@@ -65,7 +65,8 @@ This will start the AI Service along with the other microservices in a shared ne
 If you want to run the service without Docker, make sure Redis is running locally and your `.env` file is properly set up:
 
 ```bash
-go run cmd/main.go
+cd cmd
+go run main.go
 ```
 
 The server will start on `http://localhost:8082`.

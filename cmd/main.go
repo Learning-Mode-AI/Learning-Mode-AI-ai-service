@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"Youtube-Learning-Mode-Ai-Service/pkg/handlers"
-	"Youtube-Learning-Mode-Ai-Service/pkg/services"
+	"Learning-Mode-AI-Ai-Service/pkg/handlers"
+	"Learning-Mode-AI-Ai-Service/pkg/services"
 
 	"github.com/gorilla/mux"
 )

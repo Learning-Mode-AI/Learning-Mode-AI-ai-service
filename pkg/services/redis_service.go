@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"context"
 	"log"
 
@@ -15,7 +16,7 @@ var (
 // Initialize Redis connection
 func InitRedis() {
 	RedisClient = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379", // Redis address
+		Addr:     config.RedisHost, // Redis address
 		Password: "",               // No password set
 		DB:       0,                // Use default DB
 	})

@@ -4,17 +4,23 @@ import (
 	"log"
 	"net/http"
 
+	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"Learning-Mode-AI-Ai-Service/pkg/handlers"
 	"Learning-Mode-AI-Ai-Service/pkg/services"
-
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 )
 
-func main() {
-	// Initialize OpenAI client and Redis connection
-	services.InitOpenAIClient()
+func init() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+	config.InitConfig()
 	services.InitRedis()
+}
 
+func main() {
 	// Set up router
 	r := mux.NewRouter()
 

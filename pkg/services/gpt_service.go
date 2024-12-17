@@ -10,8 +10,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
 type ThreadManager struct {
@@ -32,12 +30,6 @@ type InitializeRequest struct {
 	Transcript         string `json:"transcript"`
 }
 
-// Initialize the OpenAI client and load the API key
-func InitOpenAIClient() {
-	if err := godotenv.Load("../.env"); err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
-	}
-}
 
 // CreateAssistantWithMetadata creates a new assistant based on YouTube video metadata
 func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {

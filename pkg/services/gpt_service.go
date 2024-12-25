@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -438,4 +439,61 @@ type Message struct {
 	ID      string            `json:"id"`
 	Role    string            `json:"role"`
 	Content []ContentFragment `json:"content"` // Content is now a list of fragments
+}
+
+// GenerateSummary takes a transcript and returns a concise summary.
+func GenerateSummary(transcript string) (string, error) {
+	prompt := fmt.Sprintf("Summarize the following video transcript concisely:\n\n%s", transcript)
+	response, err := CallGPT(prompt)
+	if err != nil {
+		return "", fmt.Errorf("GPT call failed: %v", err)
+	}
+	return response, nil
+}
+
+func CallGPT(prompt string) (string, error) {
+	apiURL := "https://api.openai.com/v1/chat/completions"
+
+    requestBody := map[string]interface{}{
+        "model": "gpt-4o-mini", // or gpt-3.5-turbo for lower cost
+        "messages": []map[string]string{
+            {"role": "system", "content": "You are a helpful assistant that summarizes video transcripts."},
+            {"role": "user", "content": prompt},
+        },
+        "temperature": 0.7,
+        "max_tokens": 100, // Adjust as needed
+    }
+
+    bodyBytes, err := json.Marshal(requestBody)
+    if err != nil {
+        return "", fmt.Errorf("failed to marshal request: %v", err)
+    }
+
+    req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(bodyBytes))
+    if err != nil {
+        return "", fmt.Errorf("failed to create request: %v", err)
+    }
+
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
+
+    client := &http.Client{Timeout: 15 * time.Second}
+    resp, err := client.Do(req)
+    if err != nil {
+        return "", fmt.Errorf("GPT API call failed: %v", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        body, _ := io.ReadAll(resp.Body)
+        return "", fmt.Errorf("GPT API error: %s", string(body))
+    }
+
+    var gptResponse map[string]interface{}
+    if err := json.NewDecoder(resp.Body).Decode(&gptResponse); err != nil {
+        return "", fmt.Errorf("failed to decode GPT response: %v", err)
+    }
+
+    // Extract the summary from the assistant's message
+    return gptResponse["choices"].([]interface{})[0].(map[string]interface{})["message"].(map[string]interface{})["content"].(string), nil
 }

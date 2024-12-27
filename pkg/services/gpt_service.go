@@ -10,8 +10,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
 type ThreadManager struct {
@@ -30,13 +28,6 @@ type InitializeRequest struct {
 	Title              string `json:"title"`
 	Channel            string `json:"channel"`
 	Transcript         string `json:"transcript"`
-}
-
-// Initialize the OpenAI client and load the API key
-func InitOpenAIClient() {
-	if err := godotenv.Load("../.env"); err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
-	}
 }
 
 // CreateAssistantWithMetadata creates a new assistant based on YouTube video metadata
@@ -425,10 +416,8 @@ func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
 
 func createPrompt(question string, timestamp int) string {
 	// Format the timestamp as mm:ss
-	formattedTimestamp := fmt.Sprintf("%02d:%02d", timestamp/60, timestamp%60)
-
 	// Create the prompt by appending the timestamp to the question
-	return fmt.Sprintf("At the timestamp <%s>, user asks: %s, Give a response based on the context of the video around the timestamp", formattedTimestamp, question)
+	return fmt.Sprintf("At the timestamp <%d>, user asks: %s, Give a response based on the context of the video around the timestamp", timestamp, question)
 }
 
 type TextContent struct {

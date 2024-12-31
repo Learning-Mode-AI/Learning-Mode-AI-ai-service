@@ -438,23 +438,29 @@ type Message struct {
 	Content []ContentFragment `json:"content"` // Content is now a list of fragments
 }
 
-// GenerateSummary takes a transcript and returns a concise summary.
+// GenerateSummary takes a video ID, retrieves the transcript from Redis, and returns a concise summary.
 func GenerateSummary(transcript string) (string, error) {
-	prompt := fmt.Sprintf("Summarize the following video transcript concisely:\n\n%s", transcript)
-	response, err := CallGPT(prompt)
-	if err != nil {
-		return "", fmt.Errorf("GPT call failed: %v", err)
-	}
-	return response, nil
+    if transcript == "" {
+        return "", fmt.Errorf("transcript is empty")
+    }
+	systemPrompt := "You are a helpful assistant that summarizes video transcripts."
+    prompt := fmt.Sprintf("Summarize the following video transcript concisely:\n\n%s", transcript)
+    response, err := CallGPT(prompt, systemPrompt)
+    if err != nil {
+        return "", fmt.Errorf("GPT call failed: %v", err)
+    }
+    return response, nil
 }
 
-func CallGPT(prompt string) (string, error) {
+
+
+func CallGPT(prompt string, systemPrompt string) (string, error) {
 	apiURL := "https://api.openai.com/v1/chat/completions"
 
     requestBody := map[string]interface{}{
         "model": "gpt-4o-mini", // or gpt-3.5-turbo for lower cost
         "messages": []map[string]string{
-            {"role": "system", "content": "You are a helpful assistant that summarizes video transcripts."},
+            {"role": "system", "content": systemPrompt},
             {"role": "user", "content": prompt},
         },
         "temperature": 0.7,

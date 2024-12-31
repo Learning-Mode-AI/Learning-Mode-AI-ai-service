@@ -31,7 +31,7 @@ func InitRedis() {
 
 // GetTranscriptFromRedis retrieves the transcript for a given video ID from Redis
 func GetTranscriptFromRedis(videoID string) (string, error) {
-    key := "transcript:" + videoID
+    key := videoID
     log.Printf("Querying Redis with key: %s", key)
     val, err := RedisClient.Get(Ctx, key).Result()
     if err == redis.Nil {
@@ -43,14 +43,3 @@ func GetTranscriptFromRedis(videoID string) (string, error) {
     return val, nil
 }
 
-// StoreTranscriptInRedis stores a transcript in Redis for a given video ID
-func StoreTranscriptInRedis(videoID, transcript string) error {
-	key := "transcript:" + videoID
-	err := RedisClient.Set(Ctx, key, transcript, 0).Err() // No expiration
-	if err != nil {
-		log.Printf("Error storing transcript in Redis for video ID: %s, %v", videoID, err)
-		return err
-	}
-	log.Printf("Transcript stored in Redis for video ID: %s", videoID)
-	return nil
-}

@@ -439,7 +439,7 @@ type Message struct {
 }
 
 // GenerateSummary takes a video ID, retrieves the transcript from Redis, and returns a concise summary.
-func GenerateSummary(transcript string) (string, error) { //Go to Handler to change temp and token values
+func GenerateSummary(transcript string) (string, error) {
     if transcript == "" {
         return "", fmt.Errorf("transcript is empty")
     }

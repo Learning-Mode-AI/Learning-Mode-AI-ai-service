@@ -439,32 +439,34 @@ type Message struct {
 }
 
 // GenerateSummary takes a video ID, retrieves the transcript from Redis, and returns a concise summary.
-func GenerateSummary(transcript string) (string, error) {
+func GenerateSummary(transcript string) (string, error) { //Go to Handler to change temp and token values
     if transcript == "" {
         return "", fmt.Errorf("transcript is empty")
     }
-	systemPrompt := "You are a helpful assistant that summarizes video transcripts."
+
+    systemPrompt := "You are a helpful assistant that summarizes video transcripts."
     prompt := fmt.Sprintf("Summarize the following video transcript concisely:\n\n%s", transcript)
-    response, err := CallGPT(prompt, systemPrompt)
+
+    temperature := 0.8
+	maxTokens := 10000
+    response, err := CallGPT(prompt, systemPrompt, temperature, maxTokens)
     if err != nil {
         return "", fmt.Errorf("GPT call failed: %v", err)
     }
     return response, nil
 }
 
-
-
-func CallGPT(prompt string, systemPrompt string) (string, error) {
-	apiURL := "https://api.openai.com/v1/chat/completions"
+func CallGPT(prompt, systemPrompt string, temperature float64, maxTokens int) (string, error) {
+    apiURL := "https://api.openai.com/v1/chat/completions"
 
     requestBody := map[string]interface{}{
         "model": "gpt-4o-mini", // or gpt-3.5-turbo for lower cost
         "messages": []map[string]string{
             {"role": "system", "content": systemPrompt},
-            {"role": "user", "content": prompt},
+            {"role": "user",   "content": prompt},
         },
-        "temperature": 0.7,
-        "max_tokens": 100, // Adjust as needed
+        "temperature": temperature,
+        "max_tokens":  maxTokens,
     }
 
     bodyBytes, err := json.Marshal(requestBody)

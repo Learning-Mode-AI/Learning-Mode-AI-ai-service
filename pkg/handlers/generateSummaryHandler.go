@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"Learning-Mode-AI-Ai-Service/pkg/services"
-	"log"
 )
 
 type SummaryRequest struct {
@@ -16,40 +15,43 @@ type SummaryResponse struct {
 }
 
 func GenerateSummaryHandler(w http.ResponseWriter, r *http.Request) {
-    var req SummaryRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "Invalid request payload", http.StatusBadRequest)
-        return
-    }
+	var req SummaryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
 
-    // Debug log to confirm correct video ID
-    log.Printf("Request received with video ID: %s", req.VideoID)
+	// Check Redis for existing summary
+	summary, err := services.GetSummaryFromRedis(req.VideoID)
+	if err != nil {
+		http.Error(w, "Error checking cache", http.StatusInternalServerError)
+		return
+	}
 
-    // Retrieve the transcript from Redis
-    transcript, err := services.GetTranscriptFromRedis(req.VideoID)
-    if err != nil {
-        log.Printf("Error retrieving transcript from Redis: %v", err)
-        http.Error(w, "Failed to retrieve transcript", http.StatusInternalServerError)
-        return
-    }
+	if summary != "" {
+		resp := SummaryResponse{Summary: summary}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
 
-    if transcript == "" {
-        log.Printf("Transcript not found in Redis for video ID: %s", req.VideoID)
-        http.Error(w, "Transcript not found", http.StatusNotFound)
-        return
-    }
+	// If not cached, generate a new summary
+	transcript, err := services.GetTranscriptFromRedis(req.VideoID)
+	if transcript == "" {
+		http.Error(w, "Transcript not found", http.StatusNotFound)
+		return
+	}
 
-    // Generate the summary using the transcript
-    summary, err := services.GenerateSummary(transcript)
-    if err != nil {
-        log.Printf("Error generating summary: %v", err)
-        http.Error(w, "Failed to generate summary", http.StatusInternalServerError)
-        return
-    }
+	summary, err = services.GenerateSummary(transcript)
+	if err != nil {
+		http.Error(w, "Failed to generate summary", http.StatusInternalServerError)
+		return
+	}
 
-    // Respond with the generated summary
-    resp := SummaryResponse{Summary: summary}
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(resp)
+	// Cache the new summary in Redis
+	services.StoreSummaryInRedis(req.VideoID, summary)
+
+	resp := SummaryResponse{Summary: summary}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
-

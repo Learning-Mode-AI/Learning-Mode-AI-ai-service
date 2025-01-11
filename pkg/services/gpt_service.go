@@ -445,7 +445,7 @@ func GenerateSummary(transcript string) (string, error) {
     }
 
     systemPrompt := "You are a professional assistant specializing in summarizing video content. Your summaries should be structured, concise, and focused on the key ideas, themes, and takeaways from the video. Exclude unnecessary details or repetitive information. Present the summary in a clear and organized format with headings if applicable."
-	prompt := fmt.Sprintf("Please summarize the following video transcript. Focus on the key topics, main arguments, and actionable takeaways. Exclude irrelevant details, filler, or repetitive information. Organize the summary into the following sections:\n\n1. Title and Overview: Briefly introduce the video and its main purpose.\n2. Key Points: Outline the major ideas, concepts, or arguments presented.\n3. Conclusion: Summarize the overall message or conclusions drawn in the video.\n\nTranscript:\n%s", transcript)
+	prompt := fmt.Sprintf("Please summarize the following video transcript. Focus on the key topics, main arguments, and actionable takeaways. Exclude irrelevant details, filler, or repetitive information, title of the video. Organize the summary into the following sections:\n\n1. Overview: Briefly introduce the video and its main purpose.\n2. Key Points: Outline the major ideas, concepts, or arguments presented.\n3. Conclusion: Summarize the overall message or conclusions drawn in the video.\n\nTranscript:\n%s", transcript)
 
     temperature := 0.8
 	maxTokens := 16000

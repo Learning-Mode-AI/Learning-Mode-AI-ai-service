@@ -6,6 +6,7 @@ import (
 	"log"
 	"fmt"
 	"github.com/go-redis/redis/v8"
+	"time"
 )
 
 var (
@@ -43,3 +44,14 @@ func GetTranscriptFromRedis(videoID string) (string, error) {
     return val, nil
 }
 
+func StoreSummaryInRedis(videoID string, summary string) error {
+	return RedisClient.Set(Ctx, "summary:"+videoID, summary, 24*time.Hour).Err()
+}
+
+func GetSummaryFromRedis(videoID string) (string, error) {
+	summary, err := RedisClient.Get(Ctx, "summary:"+videoID).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return summary, err
+}

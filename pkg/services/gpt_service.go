@@ -444,11 +444,11 @@ func GenerateSummary(transcript string) (string, error) {
         return "", fmt.Errorf("transcript is empty")
     }
 
-    systemPrompt := "You are a helpful assistant that summarizes video transcripts."
-    prompt := fmt.Sprintf("Summarize the following video transcript concisely:\n\n%s", transcript)
+    systemPrompt := "You are a professional assistant specializing in summarizing video content. Your summaries should be structured, concise, and focused on the key ideas, themes, and takeaways from the video. Exclude unnecessary details or repetitive information. Present the summary in a clear and organized format with headings if applicable."
+	prompt := fmt.Sprintf("Please summarize the following video transcript. Focus on the key topics, main arguments, and actionable takeaways. Exclude irrelevant details, filler, or repetitive information, title of the video. Organize the summary into the following sections:\n\n1. Overview: Briefly introduce the video and its main purpose.\n2. Key Points: Outline the major ideas, concepts, or arguments presented.\n3. Conclusion: Summarize the overall message or conclusions drawn in the video.\n\nTranscript:\n%s", transcript)
 
     temperature := 0.8
-	maxTokens := 10000
+	maxTokens := 16000
     response, err := CallGPT(prompt, systemPrompt, temperature, maxTokens)
     if err != nil {
         return "", fmt.Errorf("GPT call failed: %v", err)
@@ -482,7 +482,7 @@ func CallGPT(prompt, systemPrompt string, temperature float64, maxTokens int) (s
     req.Header.Set("Content-Type", "application/json")
     req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
 
-    client := &http.Client{Timeout: 15 * time.Second}
+    client := &http.Client{Timeout: 60 * time.Second}
     resp, err := client.Do(req)
     if err != nil {
         return "", fmt.Errorf("GPT API call failed: %v", err)

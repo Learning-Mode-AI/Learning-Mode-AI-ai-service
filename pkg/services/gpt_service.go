@@ -443,9 +443,13 @@ func GenerateSummary(transcript string) (string, error) {
     if transcript == "" {
         return "", fmt.Errorf("transcript is empty")
     }
-	systemPrompt := "You are a helpful assistant that summarizes video transcripts."
-    prompt := fmt.Sprintf("Summarize the following video transcript concisely:\n\n%s", transcript)
-    response, err := CallGPT(prompt, systemPrompt)
+
+    systemPrompt := "You are a professional assistant specializing in summarizing video content. Your summaries should be structured, concise, and focused on the key ideas, themes, and takeaways from the video. Exclude unnecessary details or repetitive information. Present the summary in a clear and organized format with headings if applicable."
+	prompt := fmt.Sprintf("Please summarize the following video transcript. Focus on the key topics, main arguments, and actionable takeaways. Exclude irrelevant details, filler, or repetitive information, title of the video. Organize the summary into the following sections:\n\n1. Overview: Briefly introduce the video and its main purpose.\n2. Key Points: Outline the major ideas, concepts, or arguments presented.\n3. Conclusion: Summarize the overall message or conclusions drawn in the video.\n\nTranscript:\n%s", transcript)
+
+    temperature := 0.8
+	maxTokens := 16000
+    response, err := CallGPT(prompt, systemPrompt, temperature, maxTokens)
     if err != nil {
         return "", fmt.Errorf("GPT call failed: %v", err)
     }
@@ -470,14 +474,16 @@ func GenerateQuiz(transcript string) (map[string]interface{}, error) {
 func CallGPT(prompt string, systemPrompt string) (string, error) {
 	apiURL := "https://api.openai.com/v1/chat/completions"
 
+
     requestBody := map[string]interface{}{
         "model": "gpt-4o-mini", // or gpt-3.5-turbo for lower cost
         "messages": []map[string]string{
             {"role": "system", "content": systemPrompt},
-            {"role": "user", "content": prompt},
+            {"role": "user",   "content": prompt},
         },
-        "temperature": 0.7,
-        "max_tokens": 10000, // Pass in as parameter
+
+        "temperature": temperature,
+        "max_tokens":  maxTokens,
     }
 
     bodyBytes, err := json.Marshal(requestBody)

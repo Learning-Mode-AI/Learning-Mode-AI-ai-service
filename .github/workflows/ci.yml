@@ -42,6 +42,6 @@ jobs:
       - name: Trigger Deployment
         uses: peter-evans/repository-dispatch@v2
         with:
-          repository: myorg/deployment-repo
+          repository: Learning-Mode-AI/Learning-Mode-AI-deployment
           token: ${{ secrets.GITHUB_TOKEN }}
           event-type: deploy

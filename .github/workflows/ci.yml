@@ -38,3 +38,10 @@ jobs:
           key: ${{ secrets.EC2_PRIVATE_KEY }}
           script: |
             docker load < /home/${{ secrets.EC2_USER }}/images/${GITHUB_REPOSITORY##*/}.tar
+
+      - name: Trigger Deployment
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          repository: myorg/deployment-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: deploy

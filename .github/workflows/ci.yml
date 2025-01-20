@@ -22,7 +22,7 @@ jobs:
           docker save -o ${GITHUB_REPOSITORY##*/}.tar ${GITHUB_REPOSITORY##*/}:latest
 
       - name: Transfer Docker Image to EC2
-        uses: appleboy/scp-action@v0.2.4
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
@@ -31,7 +31,7 @@ jobs:
           target: "/home/${{ secrets.EC2_USER }}/images/"
 
       - name: Load Docker Image on EC2
-        uses: appleboy/ssh-action@v0.1.11
+        uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}

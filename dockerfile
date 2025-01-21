@@ -12,7 +12,6 @@ RUN go mod download
 
 # Copy the rest of the source code
 COPY . .
-COPY .env /app/.env
 
 # Build the Go application
 RUN go build -o /app/main ./cmd/main.go

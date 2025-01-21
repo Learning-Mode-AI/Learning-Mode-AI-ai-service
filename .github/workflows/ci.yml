@@ -22,10 +22,9 @@ jobs:
         run: |
           REPO_NAME=$(echo "${GITHUB_REPOSITORY##*/}" | tr '[:upper:]' '[:lower:]')
           docker save -o ${REPO_NAME}.tar ${REPO_NAME}:latest
-          ls -lh
-      
-      - name: Debug Tar File Before Transfer
-        run: ls -lh learning-mode-ai-ai-service.tar
+          
+      - name: Update File Permissions
+        run: chmod 644 learning-mode-ai-ai-service.tar
       
       - name: Ensure Target Directory Exists
         uses: appleboy/ssh-action@v0.1.7

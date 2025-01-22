@@ -57,6 +57,6 @@ jobs:
       - name: Repository Dispatch
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.DEPLOYMENT-PAT }}
+          token: ${{ secrets.DEPLOYMENT_PAT }}
           repository: learning-mode-ai/learning-mode-ai-deployment
           event-type: deploy

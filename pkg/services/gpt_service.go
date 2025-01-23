@@ -461,7 +461,7 @@ func GenerateQuiz(transcript string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("transcript is empty")
 	}
 	systemPrompt := "You are a helpful assistant that generates multiple choice questions given the full video transcript."
-	prompt := fmt.Sprintf("Generate 10 multiple-choice questions in structured JSON format based on the following transcript:\n\n%s", transcript)
+	prompt := fmt.Sprintf("Generate 10 multiple-choice questions in structured JSON format based on the following transcript( This make sure that the answer is matching one of the options):\n\n%s", transcript)
 	response, err := CallGPT2(prompt, systemPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("GPT call failed: %v", err)
@@ -471,7 +471,7 @@ func GenerateQuiz(transcript string) (map[string]interface{}, error) {
 
 
 
-func CallGPT(prompt string, systemPrompt string) (string, error) {
+func CallGPT(prompt string, systemPrompt string, temperature float64, maxTokens int) (string, error) {
 	apiURL := "https://api.openai.com/v1/chat/completions"
 
 

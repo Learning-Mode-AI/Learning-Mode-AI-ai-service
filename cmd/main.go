@@ -27,6 +27,10 @@ func main() {
 	// Define routes
 	r.HandleFunc("/ai/init-session", handlers.InitializeAssistantSession).Methods("POST")
 	r.HandleFunc("/ai/ask-question", handlers.AskAssistantQuestion).Methods("POST")
+	// New route for video summaries
+	r.HandleFunc("/ai/generate-summary", handlers.GenerateSummaryHandler).Methods("POST")
+	r.HandleFunc("/ai/generate-quiz", handlers.GenerateQuizHandler).Methods("POST")
+
 
 	// Start the server
 	log.Println("AI Service running on :8082")

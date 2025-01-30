@@ -29,7 +29,7 @@ WORKDIR /root/
 COPY --from=builder /app/main . 
 
 # Ensure .env file is in the correct place
-# COPY --from=builder /app/.env .
+COPY --from=builder /app/.env .
 
 # Expose the application port (adjust if different)
 EXPOSE 8082

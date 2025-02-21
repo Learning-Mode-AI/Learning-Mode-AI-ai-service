@@ -18,16 +18,17 @@ var (
 func InitRedis() {
 	RedisClient = redis.NewClient(&redis.Options{
 		Addr:     config.RedisHost, // Redis address
-		Password: "",               // No password set
-		DB:       0,                // Use default DB
+		TLSConfig: &tls.Config{
+			// Depending on your certificate setup,
+			// you might need to customize this further.
+			InsecureSkipVerify: true, // Use caution: this bypasses certificate verification.
+		},
 	})
 
-	// Test the connection
-	_, err := RedisClient.Ping(Ctx).Result()
+	err := RedisClient.Ping(ctx).Err()
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		panic(err)
 	}
-	log.Println("Connected to Redis")
 }
 
 // GetTranscriptFromRedis retrieves the transcript for a given video ID from Redis

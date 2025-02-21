@@ -7,7 +7,6 @@ import (
 
 var (
 	RedisHost string
-	RedisPort string
 )
 
 func InitConfig() {

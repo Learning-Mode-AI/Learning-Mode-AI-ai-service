@@ -25,7 +25,7 @@ func InitRedis() {
 		},
 	})
 
-	err := RedisClient.Ping(ctx).Err()
+	err := RedisClient.Ping(Ctx).Err()
 	if err != nil {
 		panic(err)
 	}

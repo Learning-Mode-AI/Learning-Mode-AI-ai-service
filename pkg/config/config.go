@@ -15,7 +15,7 @@ func InitConfig() {
 		RedisHost = "localhost"
 		fmt.Println("Running in local mode")
 	} else {
-		redisEnvHost = os.Getenv("REDIS_HOST")
+		redisEnvHost := os.Getenv("REDIS_HOST")
 		if redisEnvHost != "" {
 			RedisHost = redisEnvHost
 		} else {

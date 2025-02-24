@@ -3,6 +3,7 @@ package services
 import (
 	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"context"
+	"crypto/tls"
 	"log"
 	"fmt"
 	"github.com/go-redis/redis/v8"

@@ -86,7 +86,7 @@ func AskAssistantQuestion(videoID, assistantID, question string, timestamp int) 
 	}
 
 	// Pass the timestamp to AddMessageToThread
-	err = threadManager.AddMessageToThread("user", question, videoID, timestamp)
+	err = threadManager.AddMessageToThread("user", question, assistantID, timestamp)
 	if err != nil {
 		return "", fmt.Errorf("failed to add message: %v", err)
 	}
@@ -185,13 +185,10 @@ func createThread() (string, error) {
 }
 
 // Storing each interaction message in Redis
-// Storing each interaction message in Redis
 func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, timestamp int) error {
 	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/messages", tm.ThreadID)
 
-	// Create the prompt with the timestamp
 	prompt := createPrompt(content, timestamp)
-
 	log.Printf("📝 Adding message to thread. Role: %s, Assistant: %s", role, assistantID)
 
 	requestBody := map[string]interface{}{
@@ -226,9 +223,15 @@ func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, t
 		return fmt.Errorf("failed to add message to thread: %s", string(bodyBytes))
 	}
 
-	// ✅ Store the interaction in Redis under assistant-specific key
+	// ✅ Store both user and AI interactions under `assistant_id`
 	interactionKey := fmt.Sprintf("interactions:%s", assistantID)
-	err = RedisClient.RPush(Ctx, interactionKey, prompt).Err()
+
+	if role == "user" {
+		err = RedisClient.RPush(Ctx, interactionKey, fmt.Sprintf("User: %s", prompt)).Err()
+	} else {
+		err = RedisClient.RPush(Ctx, interactionKey, fmt.Sprintf("Assistant: %s", prompt)).Err()
+	}
+
 	if err != nil {
 		log.Printf("⚠️ Failed to store interaction in Redis for Assistant: %s, Error: %v", assistantID, err)
 		return fmt.Errorf("failed to store interaction in Redis: %v", err)

@@ -75,12 +75,6 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 		return "", fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	// Store the assistant ID in Redis
-	err = RedisClient.Set(Ctx, "assistant_id:"+initReq.VideoID, createResp.ID, 24*time.Hour).Err()
-	if err != nil {
-		return "", fmt.Errorf("failed to store assistant ID in Redis: %v", err)
-	}
-
 	return createResp.ID, nil
 }
 
@@ -440,20 +434,20 @@ type Message struct {
 
 // GenerateSummary takes a video ID, retrieves the transcript from Redis, and returns a concise summary.
 func GenerateSummary(transcript string) (string, error) {
-    if transcript == "" {
-        return "", fmt.Errorf("transcript is empty")
-    }
+	if transcript == "" {
+		return "", fmt.Errorf("transcript is empty")
+	}
 
-    systemPrompt := "You are a professional assistant specializing in summarizing video content. Your summaries should be structured, concise, and focused on the key ideas, themes, and takeaways from the video. Exclude unnecessary details or repetitive information. Present the summary in a clear and organized format with headings if applicable."
+	systemPrompt := "You are a professional assistant specializing in summarizing video content. Your summaries should be structured, concise, and focused on the key ideas, themes, and takeaways from the video. Exclude unnecessary details or repetitive information. Present the summary in a clear and organized format with headings if applicable."
 	prompt := fmt.Sprintf("Please summarize the following video transcript. Focus on the key topics, main arguments, and actionable takeaways. Exclude irrelevant details, filler, or repetitive information, title of the video. Organize the summary into the following sections:\n\n1. Overview: Briefly introduce the video and its main purpose.\n2. Key Points: Outline the major ideas, concepts, or arguments presented.\n3. Conclusion: Summarize the overall message or conclusions drawn in the video.\n\nTranscript:\n%s", transcript)
 
-    temperature := 0.8
+	temperature := 0.8
 	maxTokens := 16000
-    response, err := CallGPT(prompt, systemPrompt, temperature, maxTokens)
-    if err != nil {
-        return "", fmt.Errorf("GPT call failed: %v", err)
-    }
-    return response, nil
+	response, err := CallGPT(prompt, systemPrompt, temperature, maxTokens)
+	if err != nil {
+		return "", fmt.Errorf("GPT call failed: %v", err)
+	}
+	return response, nil
 }
 
 func GenerateQuiz(transcript string) (map[string]interface{}, error) {
@@ -469,57 +463,53 @@ func GenerateQuiz(transcript string) (map[string]interface{}, error) {
 	return response, nil
 }
 
-
-
 func CallGPT(prompt string, systemPrompt string, temperature float64, maxTokens int) (string, error) {
 	apiURL := "https://api.openai.com/v1/chat/completions"
 
+	requestBody := map[string]interface{}{
+		"model": "gpt-4o-mini", // or gpt-3.5-turbo for lower cost
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": prompt},
+		},
 
-    requestBody := map[string]interface{}{
-        "model": "gpt-4o-mini", // or gpt-3.5-turbo for lower cost
-        "messages": []map[string]string{
-            {"role": "system", "content": systemPrompt},
-            {"role": "user",   "content": prompt},
-        },
+		"temperature": temperature,
+		"max_tokens":  maxTokens,
+	}
 
-        "temperature": temperature,
-        "max_tokens":  maxTokens,
-    }
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %v", err)
+	}
 
-    bodyBytes, err := json.Marshal(requestBody)
-    if err != nil {
-        return "", fmt.Errorf("failed to marshal request: %v", err)
-    }
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
 
-    req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(bodyBytes))
-    if err != nil {
-        return "", fmt.Errorf("failed to create request: %v", err)
-    }
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
 
-    req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("GPT API call failed: %v", err)
+	}
+	defer resp.Body.Close()
 
-    client := &http.Client{Timeout: 60 * time.Second}
-    resp, err := client.Do(req)
-    if err != nil {
-        return "", fmt.Errorf("GPT API call failed: %v", err)
-    }
-    defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("GPT API error: %s", string(body))
+	}
 
-    if resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
-        return "", fmt.Errorf("GPT API error: %s", string(body))
-    }
+	var gptResponse map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&gptResponse); err != nil {
+		return "", fmt.Errorf("failed to decode GPT response: %v", err)
+	}
 
-    var gptResponse map[string]interface{}
-    if err := json.NewDecoder(resp.Body).Decode(&gptResponse); err != nil {
-        return "", fmt.Errorf("failed to decode GPT response: %v", err)
-    }
-
-    // Extract the summary from the assistant's message
-    return gptResponse["choices"].([]interface{})[0].(map[string]interface{})["message"].(map[string]interface{})["content"].(string), nil
+	// Extract the summary from the assistant's message
+	return gptResponse["choices"].([]interface{})[0].(map[string]interface{})["message"].(map[string]interface{})["content"].(string), nil
 }
-
 
 func CallGPT2(prompt string, systemPrompt string) (map[string]interface{}, error) {
 	apiURL := "https://api.openai.com/v1/chat/completions"
@@ -561,7 +551,7 @@ func CallGPT2(prompt string, systemPrompt string) (map[string]interface{}, error
 													"type": "string",
 												},
 											},
-											"required": []string{"option", "explanation"},
+											"required":             []string{"option", "explanation"},
 											"additionalProperties": false,
 										},
 									},
@@ -569,21 +559,20 @@ func CallGPT2(prompt string, systemPrompt string) (map[string]interface{}, error
 										"type": "string",
 									},
 								},
-								"required": []string{"text", "timestamp", "options", "answer"},
+								"required":             []string{"text", "timestamp", "options", "answer"},
 								"additionalProperties": false,
 							},
 						},
 					},
-					"required": []string{"questions"},
+					"required":             []string{"questions"},
 					"additionalProperties": false,
 				},
 				"strict": true,
 			},
 		},
 		"temperature": 0.7,
-		"max_tokens": 10000, // Adjust based on expected response size
+		"max_tokens":  10000, // Adjust based on expected response size
 	}
-	
 
 	// Marshal the request body into JSON
 	bodyBytes, err := json.Marshal(requestBody)

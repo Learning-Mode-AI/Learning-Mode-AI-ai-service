@@ -3,16 +3,26 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 var (
-	RedisHost string
+	RedisHost  string
+	TLSEnabled bool
 )
 
 func InitConfig() {
 	env := os.Getenv("ENVIRONMENT")
+	tlsEnv := os.Getenv("TLS_ENABLED")
+	tlsEnabled, err := strconv.ParseBool(tlsEnv)
+	if err != nil {
+		tlsEnabled = false
+	}
+	TLSEnabled = tlsEnabled
+
 	if env == "local" {
 		RedisHost = "localhost"
+		TLSEnabled = false
 		fmt.Println("Running in local mode")
 	} else {
 		redisEnvHost := os.Getenv("REDIS_HOST")

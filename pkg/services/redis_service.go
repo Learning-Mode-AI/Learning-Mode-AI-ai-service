@@ -3,10 +3,12 @@ package services
 import (
 	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"context"
-	"log"
+	"crypto/tls"
 	"fmt"
-	"github.com/go-redis/redis/v8"
+	"log"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
 var (
@@ -16,32 +18,37 @@ var (
 
 // Initialize Redis connection
 func InitRedis() {
+	var tlsConfig *tls.Config
+	if config.TLSEnabled {
+		tlsConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
+	} else {
+		tlsConfig = nil
+	}
 	RedisClient = redis.NewClient(&redis.Options{
-		Addr:     config.RedisHost, // Redis address
-		Password: "",               // No password set
-		DB:       0,                // Use default DB
+		Addr:      config.RedisHost, // Redis address
+		TLSConfig: tlsConfig,
 	})
 
-	// Test the connection
-	_, err := RedisClient.Ping(Ctx).Result()
+	err := RedisClient.Ping(Ctx).Err()
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		panic(err)
 	}
-	log.Println("Connected to Redis")
 }
 
 // GetTranscriptFromRedis retrieves the transcript for a given video ID from Redis
 func GetTranscriptFromRedis(videoID string) (string, error) {
-    key := videoID
-    log.Printf("Querying Redis with key: %s", key)
-    val, err := RedisClient.Get(Ctx, key).Result()
-    if err == redis.Nil {
-        log.Printf("Transcript not found for key: %s", key)
-        return "", nil
-    } else if err != nil {
-        return "", fmt.Errorf("error retrieving from Redis: %v", err)
-    }
-    return val, nil
+	key := videoID
+	log.Printf("Querying Redis with key: %s", key)
+	val, err := RedisClient.Get(Ctx, key).Result()
+	if err == redis.Nil {
+		log.Printf("Transcript not found for key: %s", key)
+		return "", nil
+	} else if err != nil {
+		return "", fmt.Errorf("error retrieving from Redis: %v", err)
+	}
+	return val, nil
 }
 
 func StoreSummaryInRedis(videoID string, summary string) error {

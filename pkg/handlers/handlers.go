@@ -50,10 +50,10 @@ func InitializeAssistantSession(w http.ResponseWriter, r *http.Request) {
 // Handler for asking a question to the assistant
 func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		VideoID     string `json:"video_id"`
-		AssistantID string `json:"assistant_id"`
-		Question    string `json:"question"`
-		Timestamp   int    `json:"timestamp"`
+		VideoID   string `json:"video_id"`
+		UserID    string `json:"userId"`
+		Question  string `json:"question"`
+		Timestamp int    `json:"timestamp"`
 	}
 
 	// Parse the request body
@@ -62,10 +62,16 @@ func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Received question for assistant '%s': %s at timestamp: %d", req.AssistantID, req.Question, req.Timestamp)
+	log.Printf("🔍 Looking up AssistantID for UserID: %s and VideoID: %s", req.UserID, req.VideoID)
+	assistantID, err := services.GetAssistantIDFromRedis(req.UserID, req.VideoID)
+	if err != nil {
+		http.Error(w, "Assistant session not found for this user and video", http.StatusBadRequest)
+		return
+	}
+	log.Printf("✅ Found AssistantID: %s", assistantID)
 
 	// Pass the timestamp to the service
-	response, err := services.AskAssistantQuestion(req.VideoID, req.AssistantID, req.Question, req.Timestamp)
+	response, err := services.AskAssistantQuestion(req.VideoID, assistantID, req.Question, req.Timestamp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

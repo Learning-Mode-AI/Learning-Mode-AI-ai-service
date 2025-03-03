@@ -3,10 +3,11 @@ package services
 import (
 	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"context"
-	"log"
 	"fmt"
-	"github.com/go-redis/redis/v8"
+	"log"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
 var (
@@ -32,16 +33,16 @@ func InitRedis() {
 
 // GetTranscriptFromRedis retrieves the transcript for a given video ID from Redis
 func GetTranscriptFromRedis(videoID string) (string, error) {
-    key := videoID
-    log.Printf("Querying Redis with key: %s", key)
-    val, err := RedisClient.Get(Ctx, key).Result()
-    if err == redis.Nil {
-        log.Printf("Transcript not found for key: %s", key)
-        return "", nil
-    } else if err != nil {
-        return "", fmt.Errorf("error retrieving from Redis: %v", err)
-    }
-    return val, nil
+	key := videoID
+	log.Printf("Querying Redis with key: %s", key)
+	val, err := RedisClient.Get(Ctx, key).Result()
+	if err == redis.Nil {
+		log.Printf("Transcript not found for key: %s", key)
+		return "", nil
+	} else if err != nil {
+		return "", fmt.Errorf("error retrieving from Redis: %v", err)
+	}
+	return val, nil
 }
 
 func StoreSummaryInRedis(videoID string, summary string) error {
@@ -54,4 +55,18 @@ func GetSummaryFromRedis(videoID string) (string, error) {
 		return "", nil
 	}
 	return summary, err
+}
+
+func GetAssistantIDFromRedis(userID, videoID string) (string, error) {
+	ctx := context.Background()
+	redisKey := fmt.Sprintf("assistant:%s:%s", userID, videoID)
+
+	assistantID, err := RedisClient.Get(ctx, redisKey).Result()
+	if err == redis.Nil {
+		return "", fmt.Errorf("❌ AssistantID not found in Redis for UserID: %s and VideoID: %s", userID, videoID)
+	} else if err != nil {
+		return "", fmt.Errorf("⚠️ Redis error: %v", err)
+	}
+
+	return assistantID, nil
 }

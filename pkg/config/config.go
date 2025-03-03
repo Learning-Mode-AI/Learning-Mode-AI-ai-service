@@ -21,7 +21,7 @@ func InitConfig() {
 	TLSEnabled = tlsEnabled
 
 	if env == "local" {
-		RedisHost = "localhost"
+		RedisHost = "localhost:6379"
 		TLSEnabled = false
 		fmt.Println("Running in local mode")
 	} else {

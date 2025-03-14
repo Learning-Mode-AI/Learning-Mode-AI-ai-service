@@ -75,67 +75,58 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 		return "", fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	// Store the assistant ID in Redis
-	err = RedisClient.Set(Ctx, "assistant_id:"+initReq.VideoID, createResp.ID, 24*time.Hour).Err()
-	if err != nil {
-		return "", fmt.Errorf("failed to store assistant ID in Redis: %v", err)
-	}
-
 	return createResp.ID, nil
 }
 
 // AskAssistantQuestion adds a question to the thread and gets a response
 func AskAssistantQuestion(videoID, assistantID, question string, timestamp int) (string, error) {
-	threadManager, err := GetOrCreateThreadManager(videoID, assistantID)
+	threadManager, err := GetOrCreateThreadManager(assistantID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get thread manager: %v", err)
 	}
 
 	// Pass the timestamp to AddMessageToThread
-	err = threadManager.AddMessageToThread("user", question, videoID, timestamp)
+	err = threadManager.AddMessageToThread("user", question, assistantID, timestamp)
 	if err != nil {
 		return "", fmt.Errorf("failed to add message: %v", err)
 	}
 
 	// Run the assistant as usual
-	return threadManager.RunAssistant(assistantID, videoID)
+	return threadManager.RunAssistant(assistantID)
 }
 
 // GetOrCreateThreadManager retrieves the thread from Redis or creates a new one if it doesn't exist
-func GetOrCreateThreadManager(videoID string, assistantID string) (*ThreadManager, error) {
+func GetOrCreateThreadManager(assistantID string) (*ThreadManager, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
+	// Generate Redis key using assistantID
+	redisKey := fmt.Sprintf("thread_id:%s", assistantID)
+
+	log.Printf("🔎 Checking Redis for thread ID: %s", redisKey)
+
 	// Check if a thread ID already exists in Redis
-	threadID, err := RedisClient.Get(Ctx, "thread_id:"+videoID).Result()
+	threadID, err := RedisClient.Get(Ctx, redisKey).Result()
 	if err != nil {
-		fmt.Printf("Error type: %T\n", err) // Print the type of the error
-		if err.Error() == "redis: nil" {
-			log.Println("Redis key not found for videoID:", videoID)
+		log.Println("❌ No thread found for Assistant:", assistantID)
+		log.Println("🔵 Attempting to create a new thread...")
 
-			// Create a new thread if no thread exists
-			threadID, err = createThread()
-			if err != nil {
-				return nil, fmt.Errorf("failed to create thread: %v", err)
-			}
-
-			// Log the newly created thread ID
-			log.Printf("New thread created with ID: %s for video: %s", threadID, videoID)
-
-			// Store the new thread ID in Redis
-			err = RedisClient.Set(Ctx, "thread_id:"+videoID, threadID, 24*time.Hour).Err()
-			if err != nil {
-				log.Printf("Failed to store thread ID in Redis for video %s: %v", videoID, err)
-				return nil, fmt.Errorf("failed to store thread ID in Redis: %v", err)
-			}
-
-			log.Printf("Thread ID successfully stored in Redis for video %s", videoID)
-		} else {
-			log.Printf("Error retrieving thread ID from Redis for video %s: %v", videoID, err)
-			return nil, fmt.Errorf("failed to retrieve thread ID from Redis: %v", err)
+		// 🔹 Create a new thread if none exists
+		threadID, err = createThread()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create thread: %v", err)
 		}
+
+		// 🔹 Store the new thread ID in Redis
+		err = RedisClient.Set(Ctx, redisKey, threadID, 24*time.Hour).Err()
+		if err != nil {
+			log.Printf("⚠️ Failed to store thread ID in Redis for Assistant: %s, Error: %v", assistantID, err)
+			return nil, fmt.Errorf("failed to store thread ID in Redis: %v", err)
+		}
+
+		log.Printf("✅ Successfully created and stored thread ID: %s for Assistant: %s", threadID, assistantID)
 	} else {
-		log.Printf("Thread ID %s retrieved from Redis for video %s", threadID, videoID)
+		log.Printf("✅ Found existing thread ID: %s for Assistant: %s", threadID, assistantID)
 	}
 
 	// Create a ThreadManager instance
@@ -148,15 +139,17 @@ func createThread() (string, error) {
 	url := "https://api.openai.com/v1/threads"
 	requestBody := map[string]interface{}{}
 
+	log.Println("🔵 Creating new thread...") // Debugging log
+
 	body, err := json.Marshal(requestBody)
 	if err != nil {
-		log.Printf("Failed to marshal thread creation request: %v", err)
+		log.Printf("❌ Failed to marshal thread creation request: %v", err)
 		return "", fmt.Errorf("failed to marshal request: %v", err)
 	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		log.Printf("Failed to create HTTP request for thread creation: %v", err)
+		log.Printf("❌ Failed to create HTTP request for thread creation: %v", err)
 		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 
@@ -167,14 +160,14 @@ func createThread() (string, error) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Failed to send thread creation request: %v", err)
+		log.Printf("❌ Failed to send thread creation request: %v", err)
 		return "", fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		log.Printf("Thread creation failed with status code %d: %s", resp.StatusCode, string(bodyBytes))
+		log.Printf("❌ Thread creation failed with status code %d: %s", resp.StatusCode, string(bodyBytes))
 		return "", fmt.Errorf("failed to create thread: %s", string(bodyBytes))
 	}
 
@@ -183,23 +176,20 @@ func createThread() (string, error) {
 	}
 	err = json.NewDecoder(resp.Body).Decode(&threadResp)
 	if err != nil {
-		log.Printf("Failed to decode thread creation response: %v", err)
+		log.Printf("❌ Failed to decode thread creation response: %v", err)
 		return "", fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	log.Printf("Thread created with ID %s", threadResp.ID)
+	log.Printf("✅ Thread created with ID %s", threadResp.ID)
 	return threadResp.ID, nil
 }
 
 // Storing each interaction message in Redis
-func (tm *ThreadManager) AddMessageToThread(role, content, videoID string, timestamp int) error {
+func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, timestamp int) error {
 	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/messages", tm.ThreadID)
 
-	// Create the prompt with the timestamp
 	prompt := createPrompt(content, timestamp)
-
-	// Log the message being added
-	log.Printf("Adding message to thread. Role: %s, Content: %s, VideoID: %s", role, prompt, videoID)
+	log.Printf("📝 Adding message to thread. Role: %s, Assistant: %s", role, assistantID)
 
 	requestBody := map[string]interface{}{
 		"role":    role,
@@ -229,26 +219,29 @@ func (tm *ThreadManager) AddMessageToThread(role, content, videoID string, times
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		log.Printf("Failed to add message to thread. StatusCode: %d, Response: %s", resp.StatusCode, string(bodyBytes))
+		log.Printf("⚠️ Failed to add message to thread. StatusCode: %d, Response: %s", resp.StatusCode, string(bodyBytes))
 		return fmt.Errorf("failed to add message to thread: %s", string(bodyBytes))
 	}
 
-	// Log success in adding message to thread
-	log.Printf("Message added to thread. Role: %s, Content: %s, VideoID: %s", role, prompt, videoID)
+	// ✅ Store both user and AI interactions under `assistant_id`
+	interactionKey := fmt.Sprintf("interactions:%s", assistantID)
 
-	// Store the interaction message in Redis under the videoID key
-	err = RedisClient.RPush(Ctx, "interactions:"+videoID, prompt).Err()
+	if role == "user" {
+		err = RedisClient.RPush(Ctx, interactionKey, fmt.Sprintf("User: %s", prompt)).Err()
+	} else {
+		err = RedisClient.RPush(Ctx, interactionKey, fmt.Sprintf("Assistant: %s", prompt)).Err()
+	}
+
 	if err != nil {
-		log.Printf("Failed to store interaction in Redis for VideoID %s: %v", videoID, err)
+		log.Printf("⚠️ Failed to store interaction in Redis for Assistant: %s, Error: %v", assistantID, err)
 		return fmt.Errorf("failed to store interaction in Redis: %v", err)
 	}
 
-	// Log success of Redis storage
-	log.Printf("Interaction message stored in Redis for VideoID: %s", videoID)
+	log.Printf("✅ Interaction message stored in Redis for Assistant: %s", assistantID)
 	return nil
 }
 
-func (tm *ThreadManager) RunAssistant(assistantID string, videoID string) (string, error) {
+func (tm *ThreadManager) RunAssistant(assistantID string) (string, error) {
 	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/runs", tm.ThreadID)
 
 	requestBody := map[string]interface{}{
@@ -313,14 +306,15 @@ func (tm *ThreadManager) RunAssistant(assistantID string, videoID string) (strin
 							assistantResponse += fragment.Text.Value
 						}
 					}
-					// Store assistant's response in Redis
-					err = RedisClient.RPush(Ctx, "interactions:"+videoID, "Assistant: "+assistantResponse).Err()
+
+					// ✅ Store assistant's response in Redis under assistant-specific key
+					err = RedisClient.RPush(Ctx, fmt.Sprintf("interactions:%s", assistantID), "Assistant: "+assistantResponse).Err()
 					if err != nil {
-						log.Printf("Failed to store assistant response in Redis for ThreadID %s: %v", tm.ThreadID, err)
+						log.Printf("Failed to store assistant response in Redis for Assistant %s: %v", assistantID, err)
 						return "", fmt.Errorf("failed to store assistant response in Redis: %v", err)
 					}
 
-					log.Printf("Assistant response stored in Redis for ThreadID: %s", tm.ThreadID)
+					log.Printf("✅ Assistant response stored in Redis for Assistant: %s", assistantID)
 					return assistantResponse, nil
 				}
 			}
@@ -440,20 +434,20 @@ type Message struct {
 
 // GenerateSummary takes a video ID, retrieves the transcript from Redis, and returns a concise summary.
 func GenerateSummary(transcript string) (string, error) {
-    if transcript == "" {
-        return "", fmt.Errorf("transcript is empty")
-    }
+	if transcript == "" {
+		return "", fmt.Errorf("transcript is empty")
+	}
 
-    systemPrompt := "You are a professional assistant specializing in summarizing video content. Your summaries should be structured, concise, and focused on the key ideas, themes, and takeaways from the video. Exclude unnecessary details or repetitive information. Present the summary in a clear and organized format with headings if applicable."
+	systemPrompt := "You are a professional assistant specializing in summarizing video content. Your summaries should be structured, concise, and focused on the key ideas, themes, and takeaways from the video. Exclude unnecessary details or repetitive information. Present the summary in a clear and organized format with headings if applicable."
 	prompt := fmt.Sprintf("Please summarize the following video transcript. Focus on the key topics, main arguments, and actionable takeaways. Exclude irrelevant details, filler, or repetitive information, title of the video. Organize the summary into the following sections:\n\n1. Overview: Briefly introduce the video and its main purpose.\n2. Key Points: Outline the major ideas, concepts, or arguments presented.\n3. Conclusion: Summarize the overall message or conclusions drawn in the video.\n\nTranscript:\n%s", transcript)
 
-    temperature := 0.8
+	temperature := 0.8
 	maxTokens := 16000
-    response, err := CallGPT(prompt, systemPrompt, temperature, maxTokens)
-    if err != nil {
-        return "", fmt.Errorf("GPT call failed: %v", err)
-    }
-    return response, nil
+	response, err := CallGPT(prompt, systemPrompt, temperature, maxTokens)
+	if err != nil {
+		return "", fmt.Errorf("GPT call failed: %v", err)
+	}
+	return response, nil
 }
 
 func GenerateQuiz(transcript string) (map[string]interface{}, error) {
@@ -461,7 +455,7 @@ func GenerateQuiz(transcript string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("transcript is empty")
 	}
 	systemPrompt := "You are a helpful assistant that generates multiple choice questions given the full video transcript."
-	prompt := fmt.Sprintf("Generate 10 multiple-choice questions in structured JSON format based on the following transcript( This make sure that the answer is matching one of the options):\n\n%s", transcript)
+	prompt := fmt.Sprintf("Generate 10 multiple-choice questions in structured JSON format based on the following transcript. Each question must have exactly one correct answer. If multiple valid answers are mentioned in the transcript, only include one of them as part of the options. The questions should be based on the transcript and should not be outside the transcript. Ensure that the answer field exactly matches one of the provided options. Transcript:\n\n%s", transcript)
 	response, err := CallGPT2(prompt, systemPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("GPT call failed: %v", err)
@@ -469,57 +463,53 @@ func GenerateQuiz(transcript string) (map[string]interface{}, error) {
 	return response, nil
 }
 
-
-
 func CallGPT(prompt string, systemPrompt string, temperature float64, maxTokens int) (string, error) {
 	apiURL := "https://api.openai.com/v1/chat/completions"
 
+	requestBody := map[string]interface{}{
+		"model": "gpt-4o-mini", // or gpt-3.5-turbo for lower cost
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": prompt},
+		},
 
-    requestBody := map[string]interface{}{
-        "model": "gpt-4o-mini", // or gpt-3.5-turbo for lower cost
-        "messages": []map[string]string{
-            {"role": "system", "content": systemPrompt},
-            {"role": "user",   "content": prompt},
-        },
+		"temperature": temperature,
+		"max_tokens":  maxTokens,
+	}
 
-        "temperature": temperature,
-        "max_tokens":  maxTokens,
-    }
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %v", err)
+	}
 
-    bodyBytes, err := json.Marshal(requestBody)
-    if err != nil {
-        return "", fmt.Errorf("failed to marshal request: %v", err)
-    }
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
 
-    req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(bodyBytes))
-    if err != nil {
-        return "", fmt.Errorf("failed to create request: %v", err)
-    }
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
 
-    req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("GPT API call failed: %v", err)
+	}
+	defer resp.Body.Close()
 
-    client := &http.Client{Timeout: 60 * time.Second}
-    resp, err := client.Do(req)
-    if err != nil {
-        return "", fmt.Errorf("GPT API call failed: %v", err)
-    }
-    defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("GPT API error: %s", string(body))
+	}
 
-    if resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
-        return "", fmt.Errorf("GPT API error: %s", string(body))
-    }
+	var gptResponse map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&gptResponse); err != nil {
+		return "", fmt.Errorf("failed to decode GPT response: %v", err)
+	}
 
-    var gptResponse map[string]interface{}
-    if err := json.NewDecoder(resp.Body).Decode(&gptResponse); err != nil {
-        return "", fmt.Errorf("failed to decode GPT response: %v", err)
-    }
-
-    // Extract the summary from the assistant's message
-    return gptResponse["choices"].([]interface{})[0].(map[string]interface{})["message"].(map[string]interface{})["content"].(string), nil
+	// Extract the summary from the assistant's message
+	return gptResponse["choices"].([]interface{})[0].(map[string]interface{})["message"].(map[string]interface{})["content"].(string), nil
 }
-
 
 func CallGPT2(prompt string, systemPrompt string) (map[string]interface{}, error) {
 	apiURL := "https://api.openai.com/v1/chat/completions"
@@ -561,7 +551,7 @@ func CallGPT2(prompt string, systemPrompt string) (map[string]interface{}, error
 													"type": "string",
 												},
 											},
-											"required": []string{"option", "explanation"},
+											"required":             []string{"option", "explanation"},
 											"additionalProperties": false,
 										},
 									},
@@ -569,21 +559,20 @@ func CallGPT2(prompt string, systemPrompt string) (map[string]interface{}, error
 										"type": "string",
 									},
 								},
-								"required": []string{"text", "timestamp", "options", "answer"},
+								"required":             []string{"text", "timestamp", "options", "answer"},
 								"additionalProperties": false,
 							},
 						},
 					},
-					"required": []string{"questions"},
+					"required":             []string{"questions"},
 					"additionalProperties": false,
 				},
 				"strict": true,
 			},
 		},
 		"temperature": 0.7,
-		"max_tokens": 10000, // Adjust based on expected response size
+		"max_tokens":  10000, // Adjust based on expected response size
 	}
-	
 
 	// Marshal the request body into JSON
 	bodyBytes, err := json.Marshal(requestBody)

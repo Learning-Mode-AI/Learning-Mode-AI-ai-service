@@ -412,7 +412,7 @@ func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
 func createPrompt(question string, timestamp int) string {
 	// Format the timestamp as mm:ss
 	// Create the prompt by appending the timestamp to the question
-	return fmt.Sprintf("At the timestamp <%d>, user asks: %s, Give a response based on the context of the video around the timestamp", timestamp, question)
+	return fmt.Sprintf("At the timestamp <%d>, user asks: %s, Give a response based on the context of the video around the timestamp. Don't include the timestamp in your response. Sound natural, and human", timestamp, question)
 }
 
 type TextContent struct {

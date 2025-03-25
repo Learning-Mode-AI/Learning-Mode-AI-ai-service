@@ -412,7 +412,7 @@ func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
 func createPrompt(question string, timestamp int) string {
 	// Format the timestamp as mm:ss
 	// Create the prompt by appending the timestamp to the question
-	return fmt.Sprintf("At the timestamp <%d>, user asks: %s, Give a response based on the context of the video around the timestamp", timestamp, question)
+	return fmt.Sprintf("At the timestamp <%d>, user asks: %s, Give a response based on the context of the video around the timestamp. Don't include the timestamp in your response. Sound natural, and human", timestamp, question)
 }
 
 type TextContent struct {
@@ -455,7 +455,7 @@ func GenerateQuiz(transcript string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("transcript is empty")
 	}
 	systemPrompt := "You are a helpful assistant that generates multiple choice questions given the full video transcript."
-	prompt := fmt.Sprintf("Generate 10 multiple-choice questions in structured JSON format based on the following transcript. Each question must have exactly one correct answer. If multiple valid answers are mentioned in the transcript, only include one of them as part of the options. The questions should be based on the transcript and should not be outside the transcript. Ensure that the answer field exactly matches one of the provided options. Transcript:\n\n%s", transcript)
+	prompt := fmt.Sprintf("Generate 10 multiple-choice questions in structured JSON format based on the following transcript. Each question must have exactly one correct answer. If multiple valid answers are mentioned in the transcript, only include one of them as part of the options. The questions should be based on the transcript and should not be outside the transcript. Ensure that the answer field exactly matches one of the provided options. Do NOT add any letters like 'A, B, C, D' before the options. Just provide the options. Transcript:\n\n%s", transcript)
 	response, err := CallGPT2(prompt, systemPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("GPT call failed: %v", err)

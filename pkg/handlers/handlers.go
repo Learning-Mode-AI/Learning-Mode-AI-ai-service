@@ -1,9 +1,9 @@
 package handlers
 
 import (
+	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"Learning-Mode-AI-Ai-Service/pkg/services"
 	"encoding/json"
-	"log"
 	"net/http"
 )
 
@@ -44,7 +44,10 @@ func InitializeAssistantSession(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
-	log.Printf("Assistant session initialized with ID: %s for video '%s'", assistantID, initReq.VideoID)
+	config.Log.WithFields(map[string]interface{}{
+		"video_id":     initReq.VideoID,
+		"assistant_id": assistantID,
+	}).Info("Assistant session initialized successfully")
 }
 
 // Handler for asking a question to the assistant
@@ -62,17 +65,32 @@ func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("🔍 Looking up AssistantID for UserID: %s and VideoID: %s", req.UserID, req.VideoID)
+	config.Log.WithFields(map[string]interface{}{
+		"user_id":  req.UserID,
+		"video_id": req.VideoID,
+	}).Info("Looking up AssistantID for user and video")
+
 	assistantID, err := services.GetAssistantIDFromRedis(req.UserID, req.VideoID)
 	if err != nil {
 		http.Error(w, "Assistant session not found for this user and video", http.StatusBadRequest)
 		return
 	}
-	log.Printf("✅ Found AssistantID: %s", assistantID)
+
+	config.Log.WithFields(map[string]interface{}{
+		"user_id":      req.UserID,
+		"video_id":     req.VideoID,
+		"assistant_id": assistantID,
+	}).Info("Found AssistantID")
 
 	// Pass the timestamp to the service
 	response, err := services.AskAssistantQuestion(req.VideoID, assistantID, req.Question, req.Timestamp)
 	if err != nil {
+		config.Log.WithFields(map[string]interface{}{
+			"user_id":      req.UserID,
+			"video_id":     req.VideoID,
+			"assistant_id": assistantID,
+			"error":        err.Error(),
+		}).Error("Failed to get answer from assistant")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -80,4 +98,10 @@ func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 	// Return the assistant's response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"answer": response})
+
+	config.Log.WithFields(map[string]interface{}{
+		"user_id":      req.UserID,
+		"video_id":     req.VideoID,
+		"assistant_id": assistantID,
+	}).Info("Successfully received answer from assistant")
 }

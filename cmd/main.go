@@ -1,12 +1,12 @@
 package main
 
 import (
-	"log"
 	"net/http"
 
 	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"Learning-Mode-AI-Ai-Service/pkg/handlers"
 	"Learning-Mode-AI-Ai-Service/pkg/services"
+
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
@@ -14,7 +14,7 @@ import (
 func init() {
 	err := godotenv.Load(".env")
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		config.Log.Fatal("Error loading .env file")
 	}
 	config.InitConfig()
 	services.InitRedis()
@@ -31,8 +31,7 @@ func main() {
 	r.HandleFunc("/ai/generate-summary", handlers.GenerateSummaryHandler).Methods("POST")
 	r.HandleFunc("/ai/generate-quiz", handlers.GenerateQuizHandler).Methods("POST")
 
-
 	// Start the server
-	log.Println("AI Service running on :8082")
-	log.Fatal(http.ListenAndServe(":8082", r))
+	config.Log.Info("AI Service running on :8082")
+	config.Log.Fatal(http.ListenAndServe(":8082", r))
 }

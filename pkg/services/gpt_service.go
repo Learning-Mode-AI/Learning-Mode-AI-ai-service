@@ -1,12 +1,12 @@
 package services
 
 import (
+	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -35,6 +35,12 @@ type InitializeRequest struct {
 func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 	url := "https://api.openai.com/v1/assistants"
 
+	config.Log.WithFields(map[string]interface{}{
+		"video_id": initReq.VideoID,
+		"title":    initReq.Title,
+		"channel":  initReq.Channel,
+	}).Info("Creating new assistant")
+
 	requestBody := map[string]interface{}{
 		"model":        "gpt-4o-mini",
 		"name":         initReq.VideoID,
@@ -43,11 +49,19 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 
 	body, err := json.Marshal(requestBody)
 	if err != nil {
+		config.Log.WithFields(map[string]interface{}{
+			"video_id": initReq.VideoID,
+			"error":    err.Error(),
+		}).Error("Failed to marshal request body")
 		return "", fmt.Errorf("failed to marshal request body: %v", err)
 	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
+		config.Log.WithFields(map[string]interface{}{
+			"video_id": initReq.VideoID,
+			"error":    err.Error(),
+		}).Error("Failed to create HTTP request")
 		return "", fmt.Errorf("failed to create HTTP request: %v", err)
 	}
 
@@ -58,12 +72,21 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
+		config.Log.WithFields(map[string]interface{}{
+			"video_id": initReq.VideoID,
+			"error":    err.Error(),
+		}).Error("Failed to send request to OpenAI API")
 		return "", fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		config.Log.WithFields(map[string]interface{}{
+			"video_id":    initReq.VideoID,
+			"status_code": resp.StatusCode,
+			"response":    string(bodyBytes),
+		}).Error("Failed to create assistant")
 		return "", fmt.Errorf("failed to create assistant: %s", string(bodyBytes))
 	}
 
@@ -72,22 +95,46 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 	}
 	err = json.NewDecoder(resp.Body).Decode(&createResp)
 	if err != nil {
+		config.Log.WithFields(map[string]interface{}{
+			"video_id": initReq.VideoID,
+			"error":    err.Error(),
+		}).Error("Failed to decode response")
 		return "", fmt.Errorf("failed to decode response: %v", err)
 	}
 
+	config.Log.WithFields(map[string]interface{}{
+		"video_id":     initReq.VideoID,
+		"assistant_id": createResp.ID,
+	}).Info("Assistant created successfully")
 	return createResp.ID, nil
 }
 
 // AskAssistantQuestion adds a question to the thread and gets a response
 func AskAssistantQuestion(videoID, assistantID, question string, timestamp int) (string, error) {
+	config.Log.WithFields(map[string]interface{}{
+		"video_id":     videoID,
+		"assistant_id": assistantID,
+		"timestamp":    timestamp,
+	}).Info("Processing question request")
+
 	threadManager, err := GetOrCreateThreadManager(assistantID)
 	if err != nil {
+		config.Log.WithFields(map[string]interface{}{
+			"video_id":     videoID,
+			"assistant_id": assistantID,
+			"error":        err.Error(),
+		}).Error("Failed to get thread manager")
 		return "", fmt.Errorf("failed to get thread manager: %v", err)
 	}
 
 	// Pass the timestamp to AddMessageToThread
 	err = threadManager.AddMessageToThread("user", question, assistantID, timestamp)
 	if err != nil {
+		config.Log.WithFields(map[string]interface{}{
+			"video_id":     videoID,
+			"assistant_id": assistantID,
+			"error":        err.Error(),
+		}).Error("Failed to add message to thread")
 		return "", fmt.Errorf("failed to add message: %v", err)
 	}
 
@@ -103,30 +150,43 @@ func GetOrCreateThreadManager(assistantID string) (*ThreadManager, error) {
 	// Generate Redis key using assistantID
 	redisKey := fmt.Sprintf("thread_id:%s", assistantID)
 
-	log.Printf("🔎 Checking Redis for thread ID: %s", redisKey)
+	config.Log.WithFields(map[string]interface{}{
+		"assistant_id": assistantID,
+	}).Debug("Checking Redis for thread ID")
 
 	// Check if a thread ID already exists in Redis
 	threadID, err := RedisClient.Get(Ctx, redisKey).Result()
 	if err != nil {
-		log.Println("❌ No thread found for Assistant:", assistantID)
-		log.Println("🔵 Attempting to create a new thread...")
+		config.Log.WithFields(map[string]interface{}{
+			"assistant_id": assistantID,
+		}).Info("No thread found for Assistant, creating new thread")
 
-		// 🔹 Create a new thread if none exists
+		// Create a new thread if none exists
 		threadID, err = createThread()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create thread: %v", err)
 		}
 
-		// 🔹 Store the new thread ID in Redis
+		// Store the new thread ID in Redis
 		err = RedisClient.Set(Ctx, redisKey, threadID, 24*time.Hour).Err()
 		if err != nil {
-			log.Printf("⚠️ Failed to store thread ID in Redis for Assistant: %s, Error: %v", assistantID, err)
+			config.Log.WithFields(map[string]interface{}{
+				"assistant_id": assistantID,
+				"thread_id":    threadID,
+				"error":        err.Error(),
+			}).Error("Failed to store thread ID in Redis")
 			return nil, fmt.Errorf("failed to store thread ID in Redis: %v", err)
 		}
 
-		log.Printf("✅ Successfully created and stored thread ID: %s for Assistant: %s", threadID, assistantID)
+		config.Log.WithFields(map[string]interface{}{
+			"assistant_id": assistantID,
+			"thread_id":    threadID,
+		}).Info("Created and stored new thread ID in Redis")
 	} else {
-		log.Printf("✅ Found existing thread ID: %s for Assistant: %s", threadID, assistantID)
+		config.Log.WithFields(map[string]interface{}{
+			"assistant_id": assistantID,
+			"thread_id":    threadID,
+		}).Debug("Found existing thread ID in Redis")
 	}
 
 	// Create a ThreadManager instance
@@ -139,17 +199,21 @@ func createThread() (string, error) {
 	url := "https://api.openai.com/v1/threads"
 	requestBody := map[string]interface{}{}
 
-	log.Println("🔵 Creating new thread...") // Debugging log
+	config.Log.Info("Creating new thread")
 
 	body, err := json.Marshal(requestBody)
 	if err != nil {
-		log.Printf("❌ Failed to marshal thread creation request: %v", err)
+		config.Log.WithFields(map[string]interface{}{
+			"error": err.Error(),
+		}).Error("Failed to marshal thread creation request")
 		return "", fmt.Errorf("failed to marshal request: %v", err)
 	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		log.Printf("❌ Failed to create HTTP request for thread creation: %v", err)
+		config.Log.WithFields(map[string]interface{}{
+			"error": err.Error(),
+		}).Error("Failed to create HTTP request for thread creation")
 		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 
@@ -160,14 +224,19 @@ func createThread() (string, error) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("❌ Failed to send thread creation request: %v", err)
+		config.Log.WithFields(map[string]interface{}{
+			"error": err.Error(),
+		}).Error("Failed to send thread creation request")
 		return "", fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		log.Printf("❌ Thread creation failed with status code %d: %s", resp.StatusCode, string(bodyBytes))
+		config.Log.WithFields(map[string]interface{}{
+			"status_code": resp.StatusCode,
+			"response":    string(bodyBytes),
+		}).Error("Thread creation failed")
 		return "", fmt.Errorf("failed to create thread: %s", string(bodyBytes))
 	}
 
@@ -176,11 +245,15 @@ func createThread() (string, error) {
 	}
 	err = json.NewDecoder(resp.Body).Decode(&threadResp)
 	if err != nil {
-		log.Printf("❌ Failed to decode thread creation response: %v", err)
+		config.Log.WithFields(map[string]interface{}{
+			"error": err.Error(),
+		}).Error("Failed to decode thread creation response")
 		return "", fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	log.Printf("✅ Thread created with ID %s", threadResp.ID)
+	config.Log.WithFields(map[string]interface{}{
+		"thread_id": threadResp.ID,
+	}).Info("Thread created successfully")
 	return threadResp.ID, nil
 }
 
@@ -189,7 +262,10 @@ func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, t
 	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/messages", tm.ThreadID)
 
 	prompt := createPrompt(content, timestamp)
-	log.Printf("📝 Adding message to thread. Role: %s, Assistant: %s", role, assistantID)
+	config.Log.WithFields(map[string]interface{}{
+		"role":         role,
+		"assistant_id": assistantID,
+	}).Info("Adding message to thread")
 
 	requestBody := map[string]interface{}{
 		"role":    role,
@@ -219,7 +295,12 @@ func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, t
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		log.Printf("⚠️ Failed to add message to thread. StatusCode: %d, Response: %s", resp.StatusCode, string(bodyBytes))
+		config.Log.WithFields(map[string]interface{}{
+			"role":         role,
+			"assistant_id": assistantID,
+			"status_code":  resp.StatusCode,
+			"response":     string(bodyBytes),
+		}).Error("Failed to add message to thread")
 		return fmt.Errorf("failed to add message to thread: %s", string(bodyBytes))
 	}
 
@@ -233,11 +314,17 @@ func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, t
 	}
 
 	if err != nil {
-		log.Printf("⚠️ Failed to store interaction in Redis for Assistant: %s, Error: %v", assistantID, err)
+		config.Log.WithFields(map[string]interface{}{
+			"assistant_id": assistantID,
+			"error":        err.Error(),
+		}).Error("Failed to store interaction in Redis")
 		return fmt.Errorf("failed to store interaction in Redis: %v", err)
 	}
 
-	log.Printf("✅ Interaction message stored in Redis for Assistant: %s", assistantID)
+	config.Log.WithFields(map[string]interface{}{
+		"role":         role,
+		"assistant_id": assistantID,
+	}).Info("Interaction message stored in Redis")
 	return nil
 }
 
@@ -310,11 +397,16 @@ func (tm *ThreadManager) RunAssistant(assistantID string) (string, error) {
 					// ✅ Store assistant's response in Redis under assistant-specific key
 					err = RedisClient.RPush(Ctx, fmt.Sprintf("interactions:%s", assistantID), "Assistant: "+assistantResponse).Err()
 					if err != nil {
-						log.Printf("Failed to store assistant response in Redis for Assistant %s: %v", assistantID, err)
+						config.Log.WithFields(map[string]interface{}{
+							"assistant_id": assistantID,
+							"error":        err.Error(),
+						}).Error("Failed to store assistant response in Redis")
 						return "", fmt.Errorf("failed to store assistant response in Redis: %v", err)
 					}
 
-					log.Printf("✅ Assistant response stored in Redis for Assistant: %s", assistantID)
+					config.Log.WithFields(map[string]interface{}{
+						"assistant_id": assistantID,
+					}).Info("Assistant response stored in Redis")
 					return assistantResponse, nil
 				}
 			}
@@ -361,11 +453,16 @@ func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
 	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/messages", tm.ThreadID)
 
 	// Log the retrieval request
-	log.Printf("Fetching messages from thread with ID: %s", tm.ThreadID)
+	config.Log.WithFields(map[string]interface{}{
+		"thread_id": tm.ThreadID,
+	}).Info("Fetching messages from thread")
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Printf("Failed to create HTTP request for thread message retrieval: %v", err)
+		config.Log.WithFields(map[string]interface{}{
+			"thread_id": tm.ThreadID,
+			"error":     err.Error(),
+		}).Error("Failed to create HTTP request for thread message retrieval")
 		return nil, fmt.Errorf("failed to create HTTP request: %v", err)
 	}
 
@@ -375,37 +472,55 @@ func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Failed to send request to get thread messages: %v", err)
+		config.Log.WithFields(map[string]interface{}{
+			"thread_id": tm.ThreadID,
+			"error":     err.Error(),
+		}).Error("Failed to send request to get thread messages")
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		log.Printf("Failed to fetch thread messages. StatusCode: %d, Response: %s", resp.StatusCode, string(bodyBytes))
+		config.Log.WithFields(map[string]interface{}{
+			"thread_id":     tm.ThreadID,
+			"status_code":   resp.StatusCode,
+			"response_body": string(bodyBytes),
+		}).Error("Failed to fetch thread messages")
 		return nil, fmt.Errorf("failed to get thread messages: %s", string(bodyBytes))
 	}
 
 	// Log the raw response body from OpenAI for debugging purposes
 	bodyBytes, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Failed to read response body: %v", err)
+		config.Log.WithFields(map[string]interface{}{
+			"thread_id": tm.ThreadID,
+			"error":     err.Error(),
+		}).Error("Failed to read response body")
 		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
 
-	log.Printf("Raw thread messages response: %s", string(bodyBytes))
+	config.Log.WithFields(map[string]interface{}{
+		"thread_id": tm.ThreadID,
+	}).Info("Raw thread messages response")
 
 	var messagesResp struct {
 		Data []Message `json:"data"`
 	}
 	err = json.Unmarshal(bodyBytes, &messagesResp)
 	if err != nil {
-		log.Printf("Failed to decode thread messages response: %v", err)
+		config.Log.WithFields(map[string]interface{}{
+			"thread_id": tm.ThreadID,
+			"error":     err.Error(),
+		}).Error("Failed to decode thread messages response")
 		return nil, fmt.Errorf("failed to decode response: %v", err)
 	}
 
 	// Log successful message retrieval
-	log.Printf("Successfully fetched %d messages from thread with ID: %s", len(messagesResp.Data), tm.ThreadID)
+	config.Log.WithFields(map[string]interface{}{
+		"thread_id":     tm.ThreadID,
+		"message_count": len(messagesResp.Data),
+	}).Info("Successfully fetched thread messages")
 	return messagesResp.Data, nil
 }
 

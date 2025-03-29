@@ -118,7 +118,7 @@ func GetOrCreateThreadManager(assistantID string) (*ThreadManager, error) {
 		}
 
 		// 🔹 Store the new thread ID in Redis
-		err = RedisClient.Set(Ctx, redisKey, threadID, 24*time.Hour).Err()
+		err = RedisClient.Set(Ctx, redisKey, threadID, 168*time.Hour).Err()
 		if err != nil {
 			log.Printf("⚠️ Failed to store thread ID in Redis for Assistant: %s, Error: %v", assistantID, err)
 			return nil, fmt.Errorf("failed to store thread ID in Redis: %v", err)
@@ -225,13 +225,16 @@ func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, t
 
 	// ✅ Store both user and AI interactions under `assistant_id`
 	interactionKey := fmt.Sprintf("interactions:%s", assistantID)
-
-	if role == "user" {
-		err = RedisClient.RPush(Ctx, interactionKey, fmt.Sprintf("User: %s", prompt)).Err()
-	} else {
-		err = RedisClient.RPush(Ctx, interactionKey, fmt.Sprintf("Assistant: %s", prompt)).Err()
+	prefix := "User: "
+	if role == "assistant" {
+		prefix = "Assistant: "
 	}
-
+	
+	err = RedisClient.RPush(Ctx, interactionKey, prefix+prompt).Err()
+	if err == nil {
+		err = RedisClient.Expire(Ctx, interactionKey, 168*time.Hour).Err()
+	}
+	
 	if err != nil {
 		log.Printf("⚠️ Failed to store interaction in Redis for Assistant: %s, Error: %v", assistantID, err)
 		return fmt.Errorf("failed to store interaction in Redis: %v", err)

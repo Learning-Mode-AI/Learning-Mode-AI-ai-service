@@ -52,7 +52,7 @@ func GetTranscriptFromRedis(videoID string) (string, error) {
 }
 
 func StoreSummaryInRedis(videoID string, summary string) error {
-	return RedisClient.Set(Ctx, "summary:"+videoID, summary, 24*time.Hour).Err()
+	return RedisClient.Set(Ctx, "summary:"+videoID, summary, 168*time.Hour).Err() // 1 week TTL
 }
 
 func GetSummaryFromRedis(videoID string) (string, error) {

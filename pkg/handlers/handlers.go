@@ -23,6 +23,7 @@ type AskAssistantResponse struct {
 
 // InitializeAssistantSession: Create a new assistant based on YouTube video metadata and return the assistant ID.
 func InitializeAssistantSession(w http.ResponseWriter, r *http.Request) {
+	
 	// Decode the incoming request
 	var initReq services.InitializeRequest
 	if err := json.NewDecoder(r.Body).Decode(&initReq); err != nil {
@@ -70,8 +71,21 @@ func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("✅ Found AssistantID: %s", assistantID)
 
+	//Get transcript so we can initialize thread with it
+	transcript, err := services.GetTranscriptFromRedis(req.VideoID)
+	if err != nil {
+		log.Printf("Error retrieving transcript from Redis: %v", err)
+		http.Error(w, "Failed to retrieve transcript", http.StatusInternalServerError)
+		return
+	}
+	
+	if transcript == "" {
+		http.Error(w, "Transcript not found", http.StatusNotFound)
+		return
+	}
+
 	// Pass the timestamp to the service
-	response, err := services.AskAssistantQuestion(req.VideoID, assistantID, req.Question, req.Timestamp)
+	response, err := services.AskAssistantQuestion(req.VideoID, assistantID, req.Question, req.Timestamp, transcript)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

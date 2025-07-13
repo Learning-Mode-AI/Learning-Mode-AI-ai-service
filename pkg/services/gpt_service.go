@@ -38,7 +38,7 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 	requestBody := map[string]interface{}{
 		"model":        "gpt-4o-mini",
 		"name":         initReq.VideoID,
-		"instructions": fmt.Sprintf("You are a helpful assistant for the video titled '%s' by '%s'. Here is the transcript: %s", initReq.Title, initReq.Channel, initReq.Transcript),
+		"instructions": fmt.Sprintf("You are a helpful assistant specialized in answering questions about the video titled '%s' by '%s'. "+"Wait for the full transcript in a message to begin context.",initReq.Title,initReq.Channel,),	
 	}
 
 	body, err := json.Marshal(requestBody)
@@ -79,8 +79,8 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 }
 
 // AskAssistantQuestion adds a question to the thread and gets a response
-func AskAssistantQuestion(videoID, assistantID, question string, timestamp int) (string, error) {
-	threadManager, err := GetOrCreateThreadManager(assistantID)
+func AskAssistantQuestion(videoID, assistantID, question string, timestamp int, transcript string) (string, error) {
+	threadManager, err := GetOrCreateThreadManager(assistantID, transcript)
 	if err != nil {
 		return "", fmt.Errorf("failed to get thread manager: %v", err)
 	}
@@ -96,7 +96,7 @@ func AskAssistantQuestion(videoID, assistantID, question string, timestamp int) 
 }
 
 // GetOrCreateThreadManager retrieves the thread from Redis or creates a new one if it doesn't exist
-func GetOrCreateThreadManager(assistantID string) (*ThreadManager, error) {
+func GetOrCreateThreadManager(assistantID string, transcript string) (*ThreadManager, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
@@ -112,7 +112,7 @@ func GetOrCreateThreadManager(assistantID string) (*ThreadManager, error) {
 		log.Println("🔵 Attempting to create a new thread...")
 
 		// 🔹 Create a new thread if none exists
-		threadID, err = createThread()
+		threadID, err = createThread(transcript)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create thread: %v", err)
 		}
@@ -135,9 +135,19 @@ func GetOrCreateThreadManager(assistantID string) (*ThreadManager, error) {
 	return tm, nil
 }
 
-func createThread() (string, error) {
+func createThread(transcript string) (string, error) {
 	url := "https://api.openai.com/v1/threads"
-	requestBody := map[string]interface{}{}
+
+	//transcriptChunks := chunkTranscript(transcript)
+
+	requestBody := map[string]interface{}{
+		"messages": []map[string]string{
+			{
+				"role":    "assistant", 
+				"content": fmt.Sprintf("Here is the transcript: %s", transcript),
+			},
+		},
+	}
 
 	log.Println("🔵 Creating new thread...") // Debugging log
 
@@ -615,3 +625,6 @@ func CallGPT2(prompt string, systemPrompt string) (map[string]interface{}, error
 
 	return gptResponse, nil
 }
+//func chunkTranscript(transcript string) []string{
+	
+//}

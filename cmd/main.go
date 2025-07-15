@@ -7,6 +7,7 @@ import (
 	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"Learning-Mode-AI-Ai-Service/pkg/handlers"
 	"Learning-Mode-AI-Ai-Service/pkg/services"
+
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
@@ -27,10 +28,13 @@ func main() {
 	// Define routes
 	r.HandleFunc("/ai/init-session", handlers.InitializeAssistantSession).Methods("POST")
 	r.HandleFunc("/ai/ask-question", handlers.AskAssistantQuestion).Methods("POST")
+
+	// route for asking questions with image context
+	r.HandleFunc("/ai/ask-question-with-image", handlers.AskAssistantQuestionWithImage).Methods("POST")
+
 	// New route for video summaries
 	r.HandleFunc("/ai/generate-summary", handlers.GenerateSummaryHandler).Methods("POST")
 	r.HandleFunc("/ai/generate-quiz", handlers.GenerateQuizHandler).Methods("POST")
-
 
 	// Start the server
 	log.Println("AI Service running on :8082")

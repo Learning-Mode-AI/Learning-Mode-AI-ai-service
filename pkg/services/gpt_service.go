@@ -2,13 +2,16 @@ package services
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -229,18 +232,100 @@ func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, t
 	if role == "assistant" {
 		prefix = "Assistant: "
 	}
-	
+
 	err = RedisClient.RPush(Ctx, interactionKey, prefix+prompt).Err()
 	if err == nil {
 		err = RedisClient.Expire(Ctx, interactionKey, 168*time.Hour).Err()
 	}
-	
+
 	if err != nil {
 		log.Printf("⚠️ Failed to store interaction in Redis for Assistant: %s, Error: %v", assistantID, err)
 		return fmt.Errorf("failed to store interaction in Redis: %v", err)
 	}
 
 	log.Printf("✅ Interaction message stored in Redis for Assistant: %s", assistantID)
+	return nil
+}
+
+// AskAssistantQuestionWithImage adds a question with image context to the thread and gets a response
+func AskAssistantQuestionWithImage(videoID, assistantID, question string, timestamp int, imageContext string) (string, error) {
+	// GetOrCreateThreadManager retrieves the thread from Redis or creates a new one if it doesn't exist
+	threadManager, err := GetOrCreateThreadManager(assistantID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get thread manager: %v", err)
+	}
+	// Add the question with image context to the thread
+	err = threadManager.addMessageToThreadWithImage("user", question, assistantID, timestamp, imageContext)
+	if err != nil {
+		return "", fmt.Errorf("failed to add message with image context: %v", err)
+	}
+	// Run the assistant as usual
+	return threadManager.RunAssistant(assistantID)
+}
+
+// AddMessageToThreadWithImage first uploads and reference file in the thread
+func (tm *ThreadManager) addMessageToThreadWithImage(role, prompt, assistantID string, timestamp int, imageContext string) error {
+
+	// Upload the image context
+	uploadResp, err := uploadImage(imageContext)
+	if err != nil {
+		return fmt.Errorf("failed to upload image context: %v", err)
+	}
+
+	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/messages", tm.ThreadID)
+	requestBody := map[string]interface{}{
+		"role": role,
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": createPrompt(prompt, timestamp),
+			},
+			{
+				"type": "image_file",
+				"image_file": map[string]string{
+					"file_id": uploadResp, // from upload step
+				},
+			},
+		},
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %v", err)
+	}
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("OPENAI_API_KEY")))
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		log.Printf("⚠️ Failed to add message with image context to thread. StatusCode: %d, Response: %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("failed to add message with image context to thread: %s", string(bodyBytes))
+	}
+	// ✅ Store both user and AI interactions under `assistant_id`
+	interactionKey := fmt.Sprintf("interactions:%s", assistantID)
+	prefix := "User: "
+	if role == "assistant" {
+		prefix = "Assistant: "
+	}
+	err = RedisClient.RPush(Ctx, interactionKey, prefix+prompt).Err()
+	if err == nil {
+		err = RedisClient.Expire(Ctx, interactionKey, 168*time.Hour).Err()
+	}
+	if err != nil {
+		log.Printf("⚠️ Failed to store interaction with image context in Redis for Assistant: %s, Error: %v", assistantID, err)
+		return fmt.Errorf("failed to store interaction with image context in Redis: %v", err)
+	}
+	log.Printf("✅ Interaction with image context stored in Redis for Assistant: %s", assistantID)
 	return nil
 }
 
@@ -614,4 +699,62 @@ func CallGPT2(prompt string, systemPrompt string) (map[string]interface{}, error
 	}
 
 	return gptResponse, nil
+}
+
+func uploadImage(imageData string) (string, error) {
+
+	//Get data only
+	if idx := strings.Index(imageData, ","); idx != -1 {
+		imageData = imageData[idx+1:]
+	}
+
+	//Convert imageData to bytes
+	imageBytes, err := base64.StdEncoding.DecodeString(imageData)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode base64 image data: %v", err)
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	part, err := writer.CreateFormFile("file", "image.jpg")
+	if err != nil {
+		return "", fmt.Errorf("failed to create form file: %v", err)
+	}
+	_, err = part.Write(imageBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to write image: %v", err)
+	}
+
+	_ = writer.WriteField("purpose", "assistants")
+	writer.Close()
+
+	// Send to OpenAI
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/files", &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("upload failed: %s", body)
+	}
+
+	var result struct {
+		ID string `json:"id"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode upload response: %v", err)
+	}
+
+	return result.ID, nil
 }

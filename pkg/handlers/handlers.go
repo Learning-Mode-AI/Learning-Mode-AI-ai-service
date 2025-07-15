@@ -81,3 +81,36 @@ func AskAssistantQuestion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"answer": response})
 }
+
+// Handler for asking question with image context
+func AskAssistantQuestionWithImage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		VideoID   string `json:"video_id"`
+		UserID    string `json:"userId"`
+		Question  string `json:"question"`
+		Timestamp int    `json:"timestamp"`
+		ImageData string `json:"image_data"` // Base64 encoded image data
+	}
+
+	// Parse the request body
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("🔍 Looking up AssistantID for UserID: %s and VideoID: %s", req.UserID, req.VideoID)
+	assistantID, err := services.GetAssistantIDFromRedis(req.UserID, req.VideoID)
+	if err != nil {
+		http.Error(w, "Assistant session not found for this user and video", http.StatusBadRequest)
+		return
+	}
+	log.Printf("✅ Found AssistantID: %s", assistantID)
+	response, err := services.AskAssistantQuestionWithImage(req.VideoID, assistantID, req.Question, req.Timestamp, req.ImageData)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"answer": response})
+}

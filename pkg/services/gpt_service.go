@@ -38,7 +38,7 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 	requestBody := map[string]interface{}{
 		"model":        "gpt-4o-mini",
 		"name":         initReq.VideoID,
-		"instructions": fmt.Sprintf("You are a helpful assistant specialized in answering questions about the video titled '%s' by '%s'. "+"Wait for the full transcript in a message to begin context.",initReq.Title,initReq.Channel,),	
+		"instructions": fmt.Sprintf("You are a helpful assistant specialized in answering questions about the video titled '%s' by '%s'. "+"using the full provided transcript",initReq.Title,initReq.Channel,),	
 	}
 
 	body, err := json.Marshal(requestBody)
@@ -85,7 +85,6 @@ func AskAssistantQuestion(videoID, assistantID, question string, timestamp int, 
 		return "", fmt.Errorf("failed to get thread manager: %v", err)
 	}
 
-	// Pass the timestamp to AddMessageToThread
 	err = threadManager.AddMessageToThread("user", question, assistantID, timestamp)
 	if err != nil {
 		return "", fmt.Errorf("failed to add message: %v", err)
@@ -137,16 +136,28 @@ func GetOrCreateThreadManager(assistantID string, transcript string) (*ThreadMan
 
 func createThread(transcript string) (string, error) {
 	url := "https://api.openai.com/v1/threads"
+	const messageCharLimit = 256000
+	messages := []map[string]string{}
 
-	//transcriptChunks := chunkTranscript(transcript)
+	//Break into chunks if greater than message limit
+    if len(transcript) > messageCharLimit {
+        transcriptChunks := chunkTranscript(transcript)
+		for i,chunk:= range (transcriptChunks){		
+			messages = append(messages, map[string]string{				
+				"role":    "user", 
+				"content": fmt.Sprintf("Transcript part %d: %v", i, chunk),
+		})
+	}
+	//Add singular transcript to messages
+    } else {
+        messages = append(messages, map[string]string{				
+				"role":    "user", 
+				"content": transcript,
+		})
+    }
 
 	requestBody := map[string]interface{}{
-		"messages": []map[string]string{
-			{
-				"role":    "assistant", 
-				"content": fmt.Sprintf("Here is the transcript: %s", transcript),
-			},
-		},
+		"messages": messages,
 	}
 
 	log.Println("🔵 Creating new thread...") // Debugging log
@@ -406,7 +417,7 @@ func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
 		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
 
-	log.Printf("Raw thread messages response: %s", string(bodyBytes))
+	//log.Printf("Raw thread messages response: %s", string(bodyBytes))
 
 	var messagesResp struct {
 		Data []Message `json:"data"`
@@ -423,7 +434,7 @@ func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
 }
 
 func createPrompt(question string, timestamp int) string {
-	// Format the timestamp as mm:ss
+	// Timestamp formatted in seconds
 	// Create the prompt by appending the timestamp to the question
 	return fmt.Sprintf("At the timestamp <%d>, user asks: %s, Give a response based on the context of the video around the timestamp. Don't include the timestamp in your response. Sound natural, and human", timestamp, question)
 }
@@ -625,6 +636,21 @@ func CallGPT2(prompt string, systemPrompt string) (map[string]interface{}, error
 
 	return gptResponse, nil
 }
-//func chunkTranscript(transcript string) []string{
-	
-//}
+func chunkTranscript(transcript string) []string{
+	//Small buffer because when inserting messages into thread, we state what part of the transcript it is
+	const chunkSize = 255000
+	transcriptRunes := []rune(transcript)
+
+	var chunks []string
+
+	for i :=0; i<len(transcriptRunes); i += chunkSize{
+		end := i+chunkSize
+		if end>len(transcriptRunes){
+			end = len(transcriptRunes)
+		}
+		
+		chunks = append(chunks, string(transcriptRunes[i:end]))	}
+	log.Printf("Transcript chunked into %d parts to insert into chat", len(chunks))
+	return chunks
+}
+

@@ -61,12 +61,10 @@ func GetTranscriptFromRedis(videoID string) (string, error) {
 		return "", fmt.Errorf("failed to unmarshal video info from Redis: %v", err)
 	}
 
-	// Now you can access the transcript
-	log.Printf("Found %d transcript entries", len(videoInfo.Transcript))
-
-	// Join the transcript array into a single string
+	// Join the transcript array into a single string (this is what gpt service is expecting)
 	transcriptString := strings.Join(videoInfo.Transcript, " ")
-	log.Println(transcriptString)
+	// Remove any newline characters from transcript string
+	transcriptString = strings.Replace(transcriptString, "\n", " ", -1)
 	return transcriptString, nil
 }
 

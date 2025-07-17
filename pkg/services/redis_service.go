@@ -4,8 +4,10 @@ import (
 	"Learning-Mode-AI-Ai-Service/pkg/config"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -48,7 +50,22 @@ func GetTranscriptFromRedis(videoID string) (string, error) {
 	} else if err != nil {
 		return "", fmt.Errorf("error retrieving from Redis: %v", err)
 	}
-	return val, nil
+
+	// Unmarshal the JSON string into a struct
+	var videoInfo struct {
+		Transcript []string `json:"transcript"`
+	}
+
+	err = json.Unmarshal([]byte(val), &videoInfo)
+	if err != nil {
+		return "", fmt.Errorf("failed to unmarshal video info from Redis: %v", err)
+	}
+
+	// Join the transcript array into a single string (this is what gpt service is expecting)
+	transcriptString := strings.Join(videoInfo.Transcript, " ")
+	// Remove any newline characters from transcript string
+	transcriptString = strings.Replace(transcriptString, "\n", " ", -1)
+	return transcriptString, nil
 }
 
 func StoreSummaryInRedis(videoID string, summary string) error {

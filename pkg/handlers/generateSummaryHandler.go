@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"Learning-Mode-AI-Ai-Service/pkg/services"
+	"log"
 )
 
 type SummaryRequest struct {
@@ -37,6 +38,12 @@ func GenerateSummaryHandler(w http.ResponseWriter, r *http.Request) {
 
 	// If not cached, generate a new summary
 	transcript, err := services.GetTranscriptFromRedis(req.VideoID)
+	if err != nil {
+		log.Printf("Error retrieving transcript from Redis: %v", err)
+		http.Error(w, "Failed to retrieve transcript", http.StatusInternalServerError)
+		return
+	}
+	
 	if transcript == "" {
 		http.Error(w, "Transcript not found", http.StatusNotFound)
 		return

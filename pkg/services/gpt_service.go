@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -38,7 +37,10 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 	requestBody := map[string]interface{}{
 		"model":        "gpt-4o-mini",
 		"name":         initReq.VideoID,
-		"instructions": fmt.Sprintf("You are a helpful assistant for the video titled '%s' by '%s'. Here is the transcript: %s", initReq.Title, initReq.Channel, initReq.Transcript),
+		"instructions": fmt.Sprintf("You are a helpful assistant for the video titled '%s' by '%s'. Here is the transcript: %s. When files are attached, analyze them thoroughly and reference their content in your responses.", initReq.Title, initReq.Channel, initReq.Transcript),
+		"tools": []map[string]interface{}{
+			{"type": "file_search"}, // Enable file search capability
+		},
 	}
 
 	body, err := json.Marshal(requestBody)
@@ -63,7 +65,7 @@ func CreateAssistantWithMetadata(initReq InitializeRequest) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("failed to create assistant: %s", string(bodyBytes))
 	}
 
@@ -92,6 +94,23 @@ func AskAssistantQuestion(videoID, assistantID, question string, timestamp int) 
 	}
 
 	// Run the assistant as usual
+	return threadManager.RunAssistant(assistantID)
+}
+
+// AskAssistantQuestionWithFile adds a question with file attachment to the thread and gets a response
+func AskAssistantQuestionWithFile(videoID, assistantID, question string, timestamp int, openAIFileID, fileName string) (string, error) {
+	threadManager, err := GetOrCreateThreadManager(assistantID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get thread manager: %v", err)
+	}
+
+	// Add message with file attachment using OpenAI file ID
+	err = threadManager.AddMessageToThreadWithFile("user", question, assistantID, timestamp, openAIFileID, fileName)
+	if err != nil {
+		return "", fmt.Errorf("failed to add message with file: %v", err)
+	}
+
+	// Run the assistant
 	return threadManager.RunAssistant(assistantID)
 }
 
@@ -166,7 +185,7 @@ func createThread() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		log.Printf("❌ Thread creation failed with status code %d: %s", resp.StatusCode, string(bodyBytes))
 		return "", fmt.Errorf("failed to create thread: %s", string(bodyBytes))
 	}
@@ -218,7 +237,7 @@ func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, t
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		log.Printf("⚠️ Failed to add message to thread. StatusCode: %d, Response: %s", resp.StatusCode, string(bodyBytes))
 		return fmt.Errorf("failed to add message to thread: %s", string(bodyBytes))
 	}
@@ -241,6 +260,77 @@ func (tm *ThreadManager) AddMessageToThread(role, content, assistantID string, t
 	}
 
 	log.Printf("✅ Interaction message stored in Redis for Assistant: %s", assistantID)
+	return nil
+}
+
+// AddMessageToThreadWithFile adds a message with file attachment to the thread
+func (tm *ThreadManager) AddMessageToThreadWithFile(role, content, assistantID string, timestamp int, openAIFileID, fileName string) error {
+	url := fmt.Sprintf("https://api.openai.com/v1/threads/%s/messages", tm.ThreadID)
+
+	prompt := createPromptWithFile(content, timestamp, fileName)
+	log.Printf("📝 Adding message with file to thread. Role: %s, Assistant: %s, File: %s (ID: %s)", role, assistantID, fileName, openAIFileID)
+
+	// Create message content with file attachment (following coworker's content array pattern)
+	requestBody := map[string]interface{}{
+		"role": role,
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": prompt,
+			},
+		},
+		"attachments": []map[string]interface{}{
+			{
+				"file_id": openAIFileID,
+				"tools": []map[string]interface{}{
+					{"type": "file_search"},
+				},
+			},
+		},
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("OPENAI_API_KEY")))
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		log.Printf("⚠️ Failed to add message with file to thread. StatusCode: %d, Response: %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("failed to add message with file to thread: %s", string(bodyBytes))
+	}
+
+	// Store interaction in Redis with file info
+	interactionKey := fmt.Sprintf("interactions:%s", assistantID)
+	messageWithFile := fmt.Sprintf("User (with file %s): %s", fileName, prompt)
+	
+	err = RedisClient.RPush(Ctx, interactionKey, messageWithFile).Err()
+	if err == nil {
+		err = RedisClient.Expire(Ctx, interactionKey, 168*time.Hour).Err()
+	}
+	
+	if err != nil {
+		log.Printf("⚠️ Failed to store interaction with file in Redis for Assistant: %s, Error: %v", assistantID, err)
+		return fmt.Errorf("failed to store interaction in Redis: %v", err)
+	}
+
+	log.Printf("✅ Interaction message with file stored in Redis for Assistant: %s", assistantID)
 	return nil
 }
 
@@ -273,7 +363,7 @@ func (tm *ThreadManager) RunAssistant(assistantID string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("failed to run assistant: %s", string(bodyBytes))
 	}
 
@@ -345,7 +435,7 @@ func (tm *ThreadManager) GetRunStatus(runID string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("failed to get run status: %s", string(bodyBytes))
 	}
 
@@ -384,13 +474,13 @@ func (tm *ThreadManager) GetThreadMessages() ([]Message, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		log.Printf("Failed to fetch thread messages. StatusCode: %d, Response: %s", resp.StatusCode, string(bodyBytes))
 		return nil, fmt.Errorf("failed to get thread messages: %s", string(bodyBytes))
 	}
 
 	// Log the raw response body from OpenAI for debugging purposes
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("Failed to read response body: %v", err)
 		return nil, fmt.Errorf("failed to read response body: %v", err)
@@ -416,6 +506,11 @@ func createPrompt(question string, timestamp int) string {
 	// Format the timestamp as mm:ss
 	// Create the prompt by appending the timestamp to the question
 	return fmt.Sprintf("At the timestamp <%d>, user asks: %s, Give a response based on the context of the video around the timestamp. Don't include the timestamp in your response. Sound natural, and human", timestamp, question)
+}
+
+func createPromptWithFile(question string, timestamp int, fileName string) string {
+	// Create enhanced prompt that explicitly references the attached file
+	return fmt.Sprintf("At the timestamp <%d>, user asks: %s\n\nIMPORTANT: I have attached a file named '%s' to this message. Please analyze the attached file and incorporate its content into your response. Reference specific details from the file when relevant to the question. Also consider the video context around the timestamp. Don't include the timestamp in your response. Sound natural and human.", timestamp, question, fileName)
 }
 
 type TextContent struct {
